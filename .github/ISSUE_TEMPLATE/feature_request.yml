@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest a capability or a new provider adapter.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you unable to do today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      description: >-
+        BYOC is a blob and file-storage abstraction, not a database layer.
+        Provider-specific concepts belong inside adapters, never in core.
+      options:
+        - label: This fits the provider-neutral core, or belongs in an adapter
+        - label: I would be willing to work on this

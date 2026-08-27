@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Ajayvarmaramineni/BYOC/security/advisories/new
+    about: Report privately. Please do not open a public issue.
+  - name: Google Drive OAuth setup help
+    url: https://github.com/Ajayvarmaramineni/BYOC/blob/main/docs/google-oauth-setup.md
+    about: Most Drive setup problems are covered in the guide.

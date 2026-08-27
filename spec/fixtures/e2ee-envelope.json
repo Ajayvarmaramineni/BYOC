@@ -1,0 +1,116 @@
+{
+  "$comment": "BYOC E2EE envelope conformance vectors. The envelope is a binary format written into the user's cloud; a one-byte disagreement between SDKs makes encrypted files permanently unreadable. Algorithm: AES-256-GCM, key = PBKDF2-HMAC-SHA256(passphrase, salt, iterations, dkLen=32). The magic header, iteration field and salt are bound as GCM AAD. All hex is lowercase.",
+  "version": 1,
+  "algorithm": {
+    "cipher": "AES-256-GCM",
+    "kdf": "PBKDF2-HMAC-SHA256",
+    "key_length_bytes": 32,
+    "salt_length_bytes": 16,
+    "iv_length_bytes": 12,
+    "tag_length_bytes": 16,
+    "iter_field_length_bytes": 4,
+    "iter_field_encoding": "uint32 big-endian"
+  },
+  "iteration_bounds": {
+    "min": 10000,
+    "max": 2000000,
+    "$comment": "Read from untrusted storage before the GCM tag can authenticate it, so it MUST be range-checked before key derivation. Out-of-range MUST raise BYOC_CORRUPTED_DATA without deriving a key."
+  },
+  "layouts": {
+    "V2": [
+      "MAGIC(12)",
+      "ITER(4)",
+      "SALT(16)",
+      "IV(12)",
+      "TAG(16)",
+      "CIPHERTEXT(n)"
+    ],
+    "V1": [
+      "MAGIC(12)",
+      "SALT(16)",
+      "IV(12)",
+      "TAG(16)",
+      "CIPHERTEXT(n)"
+    ]
+  },
+  "aad": {
+    "V2": "MAGIC || ITER || SALT",
+    "V1": "MAGIC || SALT"
+  },
+  "vectors": [
+    {
+      "name": "V2 envelope, 600000 iterations",
+      "version": "V2",
+      "magic": "BYOC_E2EE_V2",
+      "passphrase": "correct-horse-battery-staple",
+      "iterations": 600000,
+      "salt_hex": "000102030405060708090a0b0c0d0e0f",
+      "iv_hex": "101112131415161718191a1b",
+      "plaintext_utf8": "BYOC cross-SDK conformance payload",
+      "derived_key_hex": "bd012c265e9e3c0931ca12018be26efe1b5d6355bc3c72acf8dbc0cb811a0107",
+      "tag_hex": "916a930f1fa3634ddd740310628ab2e7",
+      "ciphertext_hex": "d3b86f9e5c9d265790d4049ac15aee6e56e10d3494037e323a72e340c845b4b8a26d",
+      "envelope_hex": "42594f435f453245455f5632000927c0000102030405060708090a0b0c0d0e0f101112131415161718191a1b916a930f1fa3634ddd740310628ab2e7d3b86f9e5c9d265790d4049ac15aee6e56e10d3494037e323a72e340c845b4b8a26d"
+    },
+    {
+      "name": "V1 legacy envelope, 100000 iterations (no ITER field)",
+      "version": "V1",
+      "magic": "BYOC_E2EE_V1",
+      "passphrase": "correct-horse-battery-staple",
+      "iterations": 100000,
+      "salt_hex": "000102030405060708090a0b0c0d0e0f",
+      "iv_hex": "101112131415161718191a1b",
+      "plaintext_utf8": "BYOC cross-SDK conformance payload",
+      "derived_key_hex": "074ca47d1f67efe76642863fb039d88757c2b8d95f526ea9715a38f5bb48be1f",
+      "tag_hex": "085544119aca0f7ca23a49e03e0ed56f",
+      "ciphertext_hex": "69f189c19f923fbc74abaf18dd34226a241367f0e0a5fa3f4501c95fd0a7850b37b9",
+      "envelope_hex": "42594f435f453245455f5631000102030405060708090a0b0c0d0e0f101112131415161718191a1b085544119aca0f7ca23a49e03e0ed56f69f189c19f923fbc74abaf18dd34226a241367f0e0a5fa3f4501c95fd0a7850b37b9"
+    }
+  ],
+  "rejection_cases": [
+    {
+      "name": "iteration count above maximum",
+      "mutate": {
+        "offset": 12,
+        "uint32_be": 2000000001
+      },
+      "expect_error": "BYOC_CORRUPTED_DATA",
+      "$comment": "MUST be rejected before key derivation; a conforming impl returns in well under a second."
+    },
+    {
+      "name": "iteration count below minimum",
+      "mutate": {
+        "offset": 12,
+        "uint32_be": 1
+      },
+      "expect_error": "BYOC_CORRUPTED_DATA"
+    },
+    {
+      "name": "unknown magic version",
+      "mutate": {
+        "offset": 0,
+        "ascii": "BYOC_E2EE_V9"
+      },
+      "expect_error": "BYOC_CORRUPTED_DATA"
+    },
+    {
+      "name": "in-range iteration tamper caught by AAD",
+      "mutate": {
+        "offset": 12,
+        "uint32_be": 664000
+      },
+      "expect_error": "BYOC_AUTH_REQUIRED",
+      "$comment": "Passes the range check, then fails the GCM tag: both layers must be present."
+    },
+    {
+      "name": "wrong passphrase",
+      "passphrase": "not-the-right-passphrase",
+      "expect_error": "BYOC_AUTH_REQUIRED"
+    },
+    {
+      "name": "truncated below header length",
+      "truncate_to": 20,
+      "expect_error": "BYOC_CORRUPTED_DATA"
+    }
+  ]
+}

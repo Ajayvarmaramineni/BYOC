@@ -1,0 +1,157 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  typescript:
+    name: TypeScript (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all workspaces
+        run: npm run build
+
+      - name: Typecheck TypeScript packages
+        run: npm run typecheck
+
+      - name: Run unit and conformance suites
+        run: npm test
+
+  python:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    defaults:
+      run:
+        working-directory: python
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install package and dev dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Typecheck (strict)
+        run: mypy src
+
+      - name: Run unit and conformance suites
+        run: pytest -q
+
+  integration:
+    name: Live integration (MinIO + WebDAV)
+    runs-on: ubuntu-latest
+
+    env:
+      BYOC_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+      BYOC_TEST_S3_ACCESS_KEY: minioadmin
+      BYOC_TEST_S3_SECRET_KEY: minioadmin
+      BYOC_TEST_S3_REGION: us-east-1
+      BYOC_TEST_S3_BUCKET: byoc-integration
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      # The interop suite drives the TypeScript SDK from the Python test run,
+      # so both SDKs act on the same live servers.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: "npm"
+
+      - name: Build the TypeScript SDK
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install package and dev dependencies
+        working-directory: python
+        run: pip install -e ".[dev]"
+
+      # A real S3 implementation is the only thing that proves our signatures
+      # are accepted; mocks cannot catch a SigV4 or key-encoding regression.
+      # Run it with `docker run` rather than a `services:` block, because the
+      # official image needs `server /data` as arguments and services cannot
+      # pass them.
+      - name: Start MinIO
+        run: |
+          docker run -d --name byoc-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:latest server /data
+
+      - name: Wait for MinIO
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:9000/minio/health/live; then
+              echo "MinIO is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "MinIO did not become healthy in time"
+          docker logs byoc-minio || true
+          exit 1
+
+      - name: Run Python integration suite (MinIO + in-process WebDAV)
+        working-directory: python
+        run: pytest tests/integration -q -m integration
+
+      - name: Run cross-SDK interop suite (TypeScript <-> Python)
+        working-directory: python
+        run: pytest tests/interop -q -m interop
+
+      # Both suites skip themselves when a server is unreachable, which is right
+      # locally and dangerous here: a broken service would look like a pass.
+      - name: Fail if integration or interop tests self-skipped
+        working-directory: python
+        run: |
+          for SUITE in integration interop; do
+            OUT=$(pytest "tests/$SUITE" -q -m "$SUITE" 2>&1 | tail -3)
+            echo "$SUITE: $OUT"
+            if echo "$OUT" | grep -q "skipped"; then
+              echo "::error::$SUITE suite self-skipped; a required server was unreachable."
+              exit 1
+            fi
+          done

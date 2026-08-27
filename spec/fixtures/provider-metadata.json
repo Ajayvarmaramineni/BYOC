@@ -1,0 +1,65 @@
+{
+  "$comment": "BYOC provider-side metadata contract. These key names are WIRE FORMAT, not API surface. They are written into the user's cloud account and read back by any SDK in any language. A Python implementation MUST write the literal camelCase key 'byocVirtualPath' even though snake_case would be idiomatic -- renaming it makes files written by one SDK invisible to another.",
+  "version": 1,
+  "reserved_key_prefix": {
+    "value": "byoc",
+    "$comment": "Keys beginning with 'byoc' are reserved for BYOC itself. User-supplied metadata keys MUST NOT collide with them; implementations should let BYOC's own keys win on conflict."
+  },
+  "keys": {
+    "virtual_path": {
+      "wire_name": "byocVirtualPath",
+      "value": "the normalized virtual path, exactly as produced by normalizeVirtualPath",
+      "required_for": ["google-drive"],
+      "not_used_by": ["s3-compatible", "webdav"],
+      "$comment": "Google Drive addresses files by opaque IDs, so the virtual path is not recoverable from the provider's own structure and must be stored alongside the file. S3 and WebDAV use the encoded path AS the object key, so the path is self-describing and no sidecar is written. Do not add it to those adapters -- it would change existing object metadata for no benefit."
+    }
+  },
+  "provider_bindings": {
+    "google-drive": {
+      "mechanism": "files.appProperties",
+      "key_transform": "none",
+      "$comment": "appProperties is a flat string->string map, private to the OAuth client that wrote it. Keys are case-sensitive and stored verbatim.",
+      "example": {
+        "virtual_path_input": "users/123/Bob's Notes.pdf",
+        "appProperties": { "byocVirtualPath": "users/123/Bob's Notes.pdf" }
+      },
+      "example_with_user_metadata": {
+        "virtual_path_input": "reports/q3.pdf",
+        "user_metadata": { "author": "Alice", "reviewStatus": "final" },
+        "appProperties": {
+          "byocVirtualPath": "reports/q3.pdf",
+          "author": "Alice",
+          "reviewStatus": "final"
+        },
+        "$comment": "User metadata is merged in alongside BYOC's own keys, preserving the caller's key casing."
+      }
+    },
+    "s3-compatible": {
+      "mechanism": "x-amz-meta-* request headers",
+      "key_transform": "lowercase",
+      "$comment": "Each user metadata key K is sent as the header 'x-amz-meta-' + lowercase(K). S3 lowercases metadata keys itself, so an implementation that preserves case will still read back lowercase and mismatch. No byocVirtualPath is written -- the object key is the path.",
+      "example": {
+        "virtual_path_input": "reports/q3.pdf",
+        "user_metadata": { "Author": "Alice", "reviewStatus": "final" },
+        "headers": {
+          "x-amz-meta-author": "Alice",
+          "x-amz-meta-reviewstatus": "final"
+        }
+      }
+    },
+    "webdav": {
+      "mechanism": "none",
+      "$comment": "This adapter does not persist BYOC metadata. The encoded path is the resource URL, so the virtual path is self-describing."
+    }
+  },
+  "round_trip_cases": {
+    "$comment": "For the cross-SDK interop suite: SDK A uploads with these inputs, SDK B reads the file back and MUST recover the same virtual path and metadata.",
+    "cases": [
+      { "path": "users/123/avatar.jpg", "metadata": {} },
+      { "path": "notes/Bob's Notes.pdf", "metadata": {}, "note": "apostrophe must survive the Drive query escape round-trip" },
+      { "path": "notes/draft#2.pdf", "metadata": {}, "note": "hash must survive S3 key encoding" },
+      { "path": "docs/café/naïve.txt", "metadata": {}, "note": "unicode round-trip" },
+      { "path": "reports/q3.pdf", "metadata": { "author": "Alice" } }
+    ]
+  }
+}

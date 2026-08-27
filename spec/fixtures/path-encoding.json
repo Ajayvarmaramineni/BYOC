@@ -1,0 +1,41 @@
+{
+  "$comment": "BYOC shared conformance vectors for RFC 3986 path encoding. This determines the actual S3 object key and WebDAV URL a file is stored under. Drift here means one SDK writes to a key another SDK cannot address. Unreserved characters (A-Za-z0-9 and - . _ ~) MUST pass through unencoded; everything else MUST be percent-encoded with uppercase hex.",
+  "version": 1,
+  "rfc3986_uri_encode": {
+    "$comment": "rfc3986UriEncode(input, encode_slash) -> expected. Note that ! ' ( ) * are encoded even though encodeURIComponent in JavaScript leaves them alone; implementations must not rely on a language's built-in URL escaper without checking this set.",
+    "cases": [
+      { "input": "hello", "encode_slash": true, "expected": "hello" },
+      { "input": "a b", "encode_slash": true, "expected": "a%20b" },
+      { "input": "draft#2", "encode_slash": true, "expected": "draft%232" },
+      { "input": "what?", "encode_slash": true, "expected": "what%3F" },
+      { "input": "a&b", "encode_slash": true, "expected": "a%26b" },
+      { "input": "c+d", "encode_slash": true, "expected": "c%2Bd" },
+      { "input": "100%done", "encode_slash": true, "expected": "100%25done" },
+      { "input": "Bob's", "encode_slash": true, "expected": "Bob%27s" },
+      { "input": "bang!", "encode_slash": true, "expected": "bang%21" },
+      { "input": "paren(1)", "encode_slash": true, "expected": "paren%281%29" },
+      { "input": "star*", "encode_slash": true, "expected": "star%2A" },
+      { "input": "tilde~x", "encode_slash": true, "expected": "tilde~x", "note": "tilde is unreserved in RFC 3986 and must NOT be encoded" },
+      { "input": "dash-dot.under_score", "encode_slash": true, "expected": "dash-dot.under_score", "note": "all unreserved" },
+      { "input": "café", "encode_slash": true, "expected": "caf%C3%A9", "note": "UTF-8 bytes, uppercase hex" },
+      { "input": "日本語", "encode_slash": true, "expected": "%E6%97%A5%E6%9C%AC%E8%AA%9E" },
+      { "input": "a/b", "encode_slash": true, "expected": "a%2Fb" },
+      { "input": "a/b", "encode_slash": false, "expected": "a/b" },
+      { "input": "x y/z#1", "encode_slash": false, "expected": "x%20y/z%231" }
+    ]
+  },
+  "encode_path_segments": {
+    "$comment": "encodePathSegments(input) -> expected. Splits on '/', encodes each segment with encode_slash=true, rejoins with '/'. Leading and trailing slashes are trimmed. It does NOT collapse duplicate interior slashes -- that is normalizeVirtualPath's job, and encoding is always applied to an already-normalized path.",
+    "cases": [
+      { "input": "notes/draft#2.pdf", "expected": "notes/draft%232.pdf", "note": "the '#' truncation bug this fixture exists to prevent" },
+      { "input": "notes/what?.txt", "expected": "notes/what%3F.txt", "note": "the '?' truncation bug this fixture exists to prevent" },
+      { "input": "Q3 report/a b.pdf", "expected": "Q3%20report/a%20b.pdf" },
+      { "input": "docs/café/naïve.txt", "expected": "docs/caf%C3%A9/na%C3%AFve.txt" },
+      { "input": "notes/Bob's Notes.pdf", "expected": "notes/Bob%27s%20Notes.pdf" },
+      { "input": "/lead/trail/", "expected": "lead/trail" },
+      { "input": "a//b", "expected": "a//b", "note": "interior duplicate slashes are preserved, not collapsed" },
+      { "input": "", "expected": "" },
+      { "input": "single.txt", "expected": "single.txt" }
+    ]
+  }
+}

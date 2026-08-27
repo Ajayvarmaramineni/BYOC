@@ -1,0 +1,55 @@
+{
+  "name": "@byoc/webdav",
+  "version": "0.2.1",
+  "description": "Universal WebDAV storage adapter for Nextcloud, ownCloud, and Synology NAS",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@byoc/core": "^0.2.1"
+  },
+  "keywords": [
+    "byoc",
+    "webdav",
+    "nextcloud",
+    "owncloud",
+    "synology",
+    "self-hosted",
+    "nas"
+  ],
+  "author": "Ajay Ramineni",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
+    "directory": "packages/webdav"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/webdav#readme",
+  "bugs": {
+    "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false
+}

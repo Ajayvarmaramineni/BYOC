@@ -1,0 +1,185 @@
+{
+  "$comment": "BYOC shared conformance vectors. Every SDK implementation MUST produce these exact results. Path normalization decides which folder bytes land in, so drift here means files written by one SDK are invisible to another. Do not edit expectations to match an implementation - fix the implementation.",
+  "version": 1,
+  "normalize": {
+    "$comment": "normalizeVirtualPath(input) -> expected. A null input represents calling with no argument.",
+    "cases": [
+      {
+        "name": "null input yields root",
+        "input": null,
+        "expected": ""
+      },
+      {
+        "name": "empty string yields root",
+        "input": "",
+        "expected": ""
+      },
+      {
+        "name": "whitespace-only yields root",
+        "input": "   ",
+        "expected": ""
+      },
+      {
+        "name": "bare filename is unchanged",
+        "input": "avatar.jpg",
+        "expected": "avatar.jpg"
+      },
+      {
+        "name": "nested path is unchanged",
+        "input": "users/123/avatar.jpg",
+        "expected": "users/123/avatar.jpg"
+      },
+      {
+        "name": "strips leading and trailing slashes",
+        "input": "/users/123/avatar.jpg/",
+        "expected": "users/123/avatar.jpg"
+      },
+      {
+        "name": "trims surrounding whitespace",
+        "input": "  /documents/report.pdf  ",
+        "expected": "documents/report.pdf"
+      },
+      {
+        "name": "collapses duplicate slashes",
+        "input": "users///123////avatar.jpg",
+        "expected": "users/123/avatar.jpg"
+      },
+      {
+        "name": "collapses leading and trailing duplicate slashes",
+        "input": "///a//b///c//",
+        "expected": "a/b/c"
+      },
+      {
+        "name": "converts Windows backslashes",
+        "input": "users\\123\\avatar.jpg",
+        "expected": "users/123/avatar.jpg"
+      },
+      {
+        "name": "converts and trims backslashes",
+        "input": "\\users\\123\\",
+        "expected": "users/123"
+      },
+      {
+        "name": "drops current-directory dot segments",
+        "input": "./users/./123/avatar.jpg",
+        "expected": "users/123/avatar.jpg"
+      },
+      {
+        "name": "strips NUL bytes",
+        "input": "a/bad\u0000name.txt",
+        "expected": "a/badname.txt"
+      },
+      {
+        "name": "strips newline and carriage return",
+        "input": "documents/\nreport\r.pdf",
+        "expected": "documents/report.pdf"
+      },
+      {
+        "name": "strips BEL and unit-separator control chars",
+        "input": "\u0007system/\u001fdata.bin",
+        "expected": "system/data.bin"
+      },
+      {
+        "name": "percent-encoded traversal is NOT decoded",
+        "input": "a/..%2f../etc/passwd",
+        "expected": "a/..%2f../etc/passwd"
+      },
+      {
+        "name": "apostrophes are preserved verbatim",
+        "input": "notes/Bob's Notes.pdf",
+        "expected": "notes/Bob's Notes.pdf"
+      },
+      {
+        "name": "unicode is preserved verbatim",
+        "input": "docs/café/naïve.txt",
+        "expected": "docs/café/naïve.txt"
+      }
+    ]
+  },
+  "normalize_errors": {
+    "$comment": "These inputs MUST raise the BYOC error identified by code. TypeScript throws StorageError; Python raises the equivalent exception. The code string is the shared contract.",
+    "cases": [
+      {
+        "name": "leading traversal",
+        "input": "../secret.txt",
+        "error_code": "BYOC_INVALID_INPUT"
+      },
+      {
+        "name": "embedded traversal",
+        "input": "users/../../etc/passwd",
+        "error_code": "BYOC_INVALID_INPUT"
+      },
+      {
+        "name": "bare double-dot segment",
+        "input": "..",
+        "error_code": "BYOC_INVALID_INPUT"
+      },
+      {
+        "name": "backslash traversal",
+        "input": "users\\..\\..\\etc",
+        "error_code": "BYOC_INVALID_INPUT"
+      }
+    ]
+  },
+  "basename": {
+    "$comment": "getBasename(input) -> expected",
+    "cases": [
+      {
+        "input": "users/123/avatar.jpg",
+        "expected": "avatar.jpg"
+      },
+      {
+        "input": "/documents/reports/q3.pdf/",
+        "expected": "q3.pdf"
+      },
+      {
+        "input": "single_file.txt",
+        "expected": "single_file.txt"
+      },
+      {
+        "input": "",
+        "expected": ""
+      }
+    ]
+  },
+  "dirname": {
+    "$comment": "getDirname(input) -> expected",
+    "cases": [
+      {
+        "input": "users/123/avatar.jpg",
+        "expected": "users/123"
+      },
+      {
+        "input": "avatar.jpg",
+        "expected": ""
+      },
+      {
+        "input": "/a/b/c/d.txt",
+        "expected": "a/b/c"
+      }
+    ]
+  },
+  "split": {
+    "$comment": "splitPath(input) -> expected",
+    "cases": [
+      {
+        "input": "users/123/avatar.jpg",
+        "expected": [
+          "users",
+          "123",
+          "avatar.jpg"
+        ]
+      },
+      {
+        "input": "avatar.jpg",
+        "expected": [
+          "avatar.jpg"
+        ]
+      },
+      {
+        "input": "",
+        "expected": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+name: Bug report
+description: Something behaves differently than documented.
+labels: [bug]
+body:
+  - type: dropdown
+    id: sdk
+    attributes:
+      label: SDK
+      options:
+        - TypeScript (@byoc/*)
+        - Python (byoc-storage)
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - Google Drive
+        - S3-compatible (R2 / AWS S3 / MinIO / Wasabi)
+        - WebDAV (Nextcloud / ownCloud / Synology)
+        - Core, not provider-specific
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "@byoc/core 0.2.0, or byoc-storage 0.2.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What was expected, and what happened instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: >-
+        The smallest code that shows the problem. If it involves a filename,
+        include the exact characters: several past bugs were specific to `#`,
+        `?`, or apostrophes in paths.
+      render: shell
+
+  - type: textarea
+    id: error
+    attributes:
+      label: Error output
+      description: Full message and stack trace. Redact tokens before pasting.
+      render: shell
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      placeholder: "Node 22.3 / Python 3.12, macOS 15"

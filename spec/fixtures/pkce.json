@@ -1,0 +1,34 @@
+{
+  "$comment": "PKCE (RFC 7636) conformance vectors. The S256 challenge must be the base64url-encoded SHA-256 of the ASCII verifier, with '+' -> '-', '/' -> '_', and '=' padding removed. A mismatch means one SDK's OAuth flow is rejected by Google while the other's succeeds.",
+  "version": 1,
+  "method": "S256",
+  "rfc7636_appendix_b": {
+    "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+    "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+    "note": "The verifier is the RFC 7636 Appendix B example."
+  },
+  "cases": [
+    {
+      "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+      "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+    },
+    {
+      "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "code_challenge": "ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA"
+    },
+    {
+      "code_verifier": "0123456789-._~abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      "code_challenge": "t2KVOUuyELfjjMQPpKmHeSqwrC_Mmzwb1J3882hbB4c"
+    },
+    {
+      "code_verifier": "short-but-valid-verifier-with-43-characters",
+      "code_challenge": "oKEcL_CDpJTLyaXJMJvjai6Y-DPZ8LjyScDahPfClxQ"
+    }
+  ],
+  "verifier_rules": {
+    "min_length": 43,
+    "max_length": 128,
+    "charset": "unreserved: A-Z a-z 0-9 - . _ ~",
+    "$comment": "generateCodeVerifier must produce a value in this range using a cryptographically secure RNG."
+  }
+}

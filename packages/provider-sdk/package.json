@@ -1,0 +1,53 @@
+{
+  "name": "@byoc/provider-sdk",
+  "version": "0.2.1",
+  "description": "BYOC Provider SDK \u2014 Certification suite and developer tools for building BYOC storage adapters",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@byoc/core": "^0.2.1"
+  },
+  "keywords": [
+    "byoc",
+    "sdk",
+    "compliance",
+    "certification",
+    "storage-adapter"
+  ],
+  "author": "Ajay Ramineni",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
+    "directory": "packages/provider-sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/provider-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false
+}

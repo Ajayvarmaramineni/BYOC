@@ -1,0 +1,82 @@
+{
+  "$comment": "AWS Signature Version 4 conformance vectors for BYOC's S3-compatible adapter. The first vector's signature was independently verified against a clean-room implementation written directly from the AWS specification, so it is an external check rather than a self-generated snapshot. Every SDK must reproduce these byte-for-byte or it cannot talk to S3/R2/MinIO.",
+  "version": 1,
+  "credentials": {
+    "access_key_id": "AKIDEXAMPLE",
+    "secret_access_key": "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+    "region": "us-east-1",
+    "service": "s3"
+  },
+  "datetime_iso": "2013-05-24T00:00:00.000Z",
+  "amz_date": "20130524T000000Z",
+  "date_stamp": "20130524",
+  "empty_body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rules": {
+    "body_hash": "sha256 of the request body; for an empty body use the sha256 of the empty string (NOT 'UNSIGNED-PAYLOAD'). Presigned URLs are the exception and use UNSIGNED-PAYLOAD.",
+    "header_normalization": "lowercase the key, strip surrounding whitespace from the value, collapse internal whitespace runs to a single space, then sort by key",
+    "canonical_query": "RFC 3986 encode key and value (slashes encoded), sort by encoded key then encoded value, join with &"
+  },
+  "canonical_query": [
+    {
+      "url": "https://b.example.com/?prefix=my%20folder&list-type=2&delimiter=%2F",
+      "expected": "delimiter=%2F&list-type=2&prefix=my%20folder"
+    },
+    {
+      "url": "https://b.example.com/?b=2&a=1&c=3",
+      "expected": "a=1&b=2&c=3"
+    },
+    {
+      "url": "https://b.example.com/?key=a+b",
+      "expected": "key=a%20b",
+      "note": "'+' in a query value decodes to a space and must re-encode as %20, never '+'"
+    }
+  ],
+  "vectors": [
+    {
+      "name": "GET with x-amz-storage-class, empty body",
+      "method": "GET",
+      "url": "https://example.amazonaws.com/test.txt",
+      "headers": {
+        "x-amz-storage-class": "REDUCED_REDUNDANCY"
+      },
+      "body": null,
+      "signed_headers": "host;x-amz-content-sha256;x-amz-date;x-amz-storage-class",
+      "signature": "c29c0c4b3f775eacb23837eb912405953619018f2417926a9ed48e32352e0e3b",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-storage-class, Signature=c29c0c4b3f775eacb23837eb912405953619018f2417926a9ed48e32352e0e3b",
+      "note": "independently verified against a clean-room SigV4 implementation"
+    },
+    {
+      "name": "PUT with mixed-case Content-Type and an encoded key",
+      "method": "PUT",
+      "url": "https://examplebucket.s3.amazonaws.com/notes/draft%232.pdf",
+      "headers": {
+        "Content-Type": "text/plain"
+      },
+      "body": "hello world",
+      "signed_headers": "content-type;host;x-amz-content-sha256;x-amz-date",
+      "signature": "ec2d72d10e743af6aeb4e5ca9dec070f563c2d00c2c353fab2f9fb4928f3f1ec",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=ec2d72d10e743af6aeb4e5ca9dec070f563c2d00c2c353fab2f9fb4928f3f1ec",
+      "note": "header casing must not change the signature"
+    },
+    {
+      "name": "GET ListObjectsV2 with multiple query params",
+      "method": "GET",
+      "url": "https://examplebucket.s3.amazonaws.com/?list-type=2&prefix=my%20folder&delimiter=%2F",
+      "headers": {},
+      "body": null,
+      "signed_headers": "host;x-amz-content-sha256;x-amz-date",
+      "signature": "3bacd7298f702f149270540d6ecb61d69a92a7528df267c565ef91dad4e23100",
+      "authorization": "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20130524/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=3bacd7298f702f149270540d6ecb61d69a92a7528df267c565ef91dad4e23100"
+    }
+  ],
+  "presigned": [
+    {
+      "name": "presigned GET, 3600s",
+      "method": "GET",
+      "url": "https://examplebucket.s3.amazonaws.com/notes/draft%232.pdf",
+      "expires_in_seconds": 3600,
+      "expected_url": "https://examplebucket.s3.amazonaws.com/notes/draft%232.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=cc2cca2204792848aefc4669b4f6d2bbcae83aaa4bb4d1aa2ddcfbba5428ccd1",
+      "note": "presigned URLs sign with UNSIGNED-PAYLOAD and host-only signed headers"
+    }
+  ]
+}

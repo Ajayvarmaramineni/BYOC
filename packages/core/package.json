@@ -1,0 +1,54 @@
+{
+  "name": "@byoc/core",
+  "version": "0.2.1",
+  "description": "Core universal storage abstraction for BYOC (Bring Your Own Cloud)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "keywords": [
+    "byoc",
+    "cloud-storage",
+    "storage-abstraction",
+    "multi-cloud",
+    "personal-cloud",
+    "self-hosted"
+  ],
+  "author": "Ajay Ramineni",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "@types/node": ">=20"
+  }
+}

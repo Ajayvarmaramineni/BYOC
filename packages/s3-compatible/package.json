@@ -1,0 +1,55 @@
+{
+  "name": "@byoc/s3-compatible",
+  "version": "0.2.1",
+  "description": "Universal S3-compatible storage adapter for Cloudflare R2, AWS S3, MinIO, and Wasabi",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@byoc/core": "^0.2.1"
+  },
+  "keywords": [
+    "byoc",
+    "s3",
+    "cloudflare-r2",
+    "minio",
+    "wasabi",
+    "aws-s3",
+    "cloud-storage"
+  ],
+  "author": "Ajay Ramineni",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
+    "directory": "packages/s3-compatible"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/s3-compatible#readme",
+  "bugs": {
+    "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false
+}
