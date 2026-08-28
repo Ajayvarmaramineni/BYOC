@@ -303,7 +303,14 @@ export class S3HttpClient {
   public async copyObject(sourceKey: string, destKey: string): Promise<void> {
     const destUrl = this.getObjectUrl(destKey);
     const cleanSourceKey = sourceKey.replace(/^\/+/, "");
-    const copySourceHeader = encodeURI(`/${this.config.bucket}/${cleanSourceKey}`);
+    // Encode per segment, not with encodeURI: encodeURI leaves `#` and `?`
+    // intact, so a copy source like `draft#2.pdf` truncates at the `#` and S3
+    // reports the object missing. This is the same rule getObjectUrl follows.
+    const encodedSourceKey = cleanSourceKey
+      .split("/")
+      .map((segment) => rfc3986UriEncode(segment, true))
+      .join("/");
+    const copySourceHeader = `/${this.config.bucket}/${encodedSourceKey}`;
 
     const signedHeaders = signS3Request(this.config, {
       method: "PUT",

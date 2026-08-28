@@ -205,4 +205,62 @@ describe("S3CompatibleProvider", () => {
     expect(file2?.path).toBe("document2.pdf"); // virtual path
     expect(file2?.size).toBe(8192);
   });
+
+  describe("copy source encoding", () => {
+    /**
+     * Regression: `copyObject` built the `x-amz-copy-source` header with
+     * `encodeURI`, which leaves `#` and `?` intact. S3 then read the header as
+     * a URL and truncated the key at those characters, so copying
+     * `draft#2.pdf` asked for `draft` and reported the object missing.
+     * The header must follow the same per-segment RFC 3986 rule as the
+     * object URL. Confirmed against a live MinIO server.
+     */
+    it.each([
+      ["reports/draft#2.pdf", "reports/draft%232.pdf"],
+      ["reports/q?x.txt", "reports/q%3Fx.txt"],
+      ["reports/sp ace.txt", "reports/sp%20ace.txt"],
+      ["reports/a+b.txt", "reports/a%2Bb.txt"],
+      ["reports/100%.txt", "reports/100%25.txt"]
+    ])("percent-encodes %s in x-amz-copy-source", async (source, expectedKey) => {
+      const provider = new S3CompatibleProvider(validConfig);
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () => ""
+      });
+
+      await provider.copy(source, "reports/destination.pdf");
+
+      const [, init] = (global.fetch as any).mock.calls[0];
+      const copySource = new Headers(init.headers).get("x-amz-copy-source");
+
+      expect(copySource).toBe(
+        `/${validConfig.bucket}/${validConfig.rootPrefix}/${expectedKey}`
+      );
+      // The bug was that these survived unescaped and truncated the key.
+      expect(copySource).not.toContain("#");
+      expect(copySource).not.toContain("?");
+    });
+
+    it("keeps path separators unescaped so the key stays a path", async () => {
+      const provider = new S3CompatibleProvider(validConfig);
+
+      (global.fetch as any).mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () => ""
+      });
+
+      await provider.copy("a/b/c.txt", "a/b/d.txt");
+
+      const [, init] = (global.fetch as any).mock.calls[0];
+      const copySource = new Headers(init.headers).get("x-amz-copy-source");
+
+      expect(copySource).toBe("/user-assets/production/data/a/b/c.txt");
+      expect(copySource).not.toContain("%2F");
+    });
+  });
 });
