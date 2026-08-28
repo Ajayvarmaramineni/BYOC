@@ -131,7 +131,7 @@ class WebDAVProvider:
             category="self-hosted",
             authentication="oauth2" if self.token else "basic",
             supports_user_owned_storage=True,
-            adapter_version="0.2.0",
+            adapter_version="0.3.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:

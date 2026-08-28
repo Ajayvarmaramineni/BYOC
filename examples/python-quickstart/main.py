@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 
-from byoc import AsyncBYOC, E2EECrypto
+from byoc import AsyncBYOC, E2EECrypto, LocalFileSystemProvider, MemoryProvider
 from byoc.providers.gdrive import (
     GoogleDriveProvider,
     generate_code_challenge,
@@ -41,6 +41,8 @@ def build_providers() -> list[object]:
     storage call is actually made.
     """
     return [
+        # No account, no network, no credentials.
+        LocalFileSystemProvider("./byoc-demo-storage"),
         GoogleDriveProvider(
             client_id="your-client-id.apps.googleusercontent.com",
             redirect_uri="http://localhost:8765/callback",
@@ -65,6 +67,23 @@ def build_providers() -> list[object]:
 async def main() -> None:
     print("=== BYOC (Bring Your Own Cloud) Python quickstart ===\n")
 
+    # 0. A real round trip, with no account and no network. Everything below
+    #    this block uses placeholder credentials and only demonstrates shapes;
+    #    this part genuinely reads and writes.
+    print("0. Real storage round trip, no credentials required:")
+    scratch = AsyncBYOC(provider=MemoryProvider())
+    async with scratch:
+        await scratch.write_text("reports/q3.md", "# Q3 results")
+        await scratch.copy("reports/q3.md", "reports/q3-backup.md")
+        print(f"   read back:  {await scratch.read_text('reports/q3-backup.md')!r}")
+
+        walked = [item.path async for item in scratch.walk("reports")]
+        print(f"   walk:       {', '.join(walked)}")
+
+        removed = await scratch.delete_tree("reports")
+        print(f"   delete_tree: removed {len(removed.deleted)}, failed {len(removed.failed)}")
+    print("   Swap MemoryProvider for LocalFileSystemProvider and it writes real files.\n")
+
     # 1. PKCE, the handshake that protects the OAuth authorization code.
     verifier = generate_code_verifier(64)
     print("1. PKCE security handshake:")
@@ -81,7 +100,7 @@ async def main() -> None:
 
     # 3. Capabilities are declared, so callers feature-detect instead of guessing.
     print("3. Capabilities differ per provider, and BYOC reports them honestly:")
-    for provider_id in ("google-drive", "s3-compatible", "webdav"):
+    for provider_id in ("google-drive", "s3-compatible", "webdav", "local"):
         caps = storage.use_provider(provider_id).capabilities()
         print(
             f"   {provider_id:16} folders={caps.folders!s:5} "
@@ -91,7 +110,7 @@ async def main() -> None:
 
     # 4. Switching backends changes nothing about the calling code.
     print("4. Runtime provider switching:")
-    for provider_id in ("s3-compatible", "webdav", "google-drive"):
+    for provider_id in ("s3-compatible", "webdav", "local", "google-drive"):
         storage.use_provider(provider_id)
         print(f"   active: {storage.manifest().name}")
     print()

@@ -48,7 +48,7 @@ export class S3CompatibleProvider implements BYOCProvider {
       category: "developer-cloud",
       authentication: "access-key",
       supportsUserOwnedStorage: false,
-      adapterVersion: "0.2.0"
+      adapterVersion: "0.3.0"
     };
   }
 

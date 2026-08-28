@@ -11,7 +11,7 @@
 [![CI](https://github.com/Ajayvarmaramineni/BYOC/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajayvarmaramineni/BYOC/actions)
 [![npm](https://img.shields.io/npm/v/@byoc/core?style=flat-square&label=%40byoc%2Fcore&color=CB3837&logo=npm)](https://www.npmjs.com/package/@byoc/core)
 [![PyPI](https://img.shields.io/pypi/v/byoc-storage?style=flat-square&label=byoc-storage&color=3776AB&logo=pypi&logoColor=white)](https://pypi.org/project/byoc-storage/)
-[![Tests](https://img.shields.io/badge/Tests-417%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
+[![Tests](https://img.shields.io/badge/Tests-735%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
 [![Types](https://img.shields.io/badge/Types-tsc%20strict%20%2B%20mypy%20strict-blue?style=flat-square)](#testing-and-verification)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)](LICENSE)
 
@@ -57,6 +57,8 @@ BYOC ships two peer SDKs with the same capabilities. Pick your language, or use 
 ```bash
 npm install @byoc/core
 
+npm install @byoc/local
+npm install @byoc/memory
 npm install @byoc/google-drive
 npm install @byoc/s3-compatible
 npm install @byoc/webdav
@@ -80,6 +82,68 @@ All adapters are included.
 ---
 
 ## Quick start
+
+No account, no network, no credentials. The local and in-memory adapters are a
+one-line install on npm and are bundled in the Python package, so you can run
+BYOC before deciding whether you want it.
+
+<table>
+<tr><th>TypeScript</th><th>Python</th></tr>
+<tr valign="top">
+<td>
+
+```ts
+import { BYOC } from "@byoc/core";
+import { LocalFileSystemProvider }
+  from "@byoc/local";
+
+const storage = new BYOC({
+  provider: new LocalFileSystemProvider({
+    rootDirectory: "./storage"
+  })
+});
+
+await storage.connect();
+await storage.writeText("hello.md", "# Hi");
+
+console.log(
+  await storage.readText("hello.md")
+);
+```
+
+</td>
+<td>
+
+```python
+from byoc import (
+    AsyncBYOC,
+    LocalFileSystemProvider,
+)
+
+storage = AsyncBYOC(
+    provider=LocalFileSystemProvider(
+        "./storage"
+    )
+)
+
+async with storage:
+    await storage.write_text(
+        "hello.md", "# Hi"
+    )
+    print(
+        await storage.read_text("hello.md")
+    )
+```
+
+</td>
+</tr>
+</table>
+
+Swap `LocalFileSystemProvider` for `S3CompatibleProvider`, `WebDAVProvider`, or
+`GoogleDriveProvider` and none of the calling code changes. That substitution is
+the entire point of BYOC, and it is the first thing you can check for yourself.
+
+### Against a real provider
 
 <table>
 <tr><th>TypeScript</th><th>Python</th></tr>
@@ -157,6 +221,8 @@ The Python SDK is idiomatic Python, not a transliteration: `snake_case`, excepti
 
 | Provider | Ownership model | TypeScript | Python | Status |
 | :--- | :--- | :--- | :--- | :--- |
+| **Local filesystem** | Local disk / mounted volume | [`@byoc/local`](./packages/local) | `byoc.LocalFileSystemProvider` | Live-verified |
+| **In-memory** | Test double | [`@byoc/memory`](./packages/memory) | `byoc.MemoryProvider` | Live-verified |
 | **Google Drive** | Personal cloud | [`@byoc/google-drive`](./packages/google-drive) | `byoc.providers.gdrive` | Live-verified |
 | **Cloudflare R2 / AWS S3 / MinIO / Wasabi** | Developer cloud | [`@byoc/s3-compatible`](./packages/s3-compatible) | `byoc.providers.s3` | Live-verified |
 | **Nextcloud / ownCloud / WebDAV / Synology** | Self-hosted | [`@byoc/webdav`](./packages/webdav) | `byoc.providers.webdav` | Live-verified |
@@ -221,11 +287,13 @@ FastAPI / Django / Next.js / Express
 - Virtual POSIX paths (`users/123/report.pdf`) resolved to each provider's native addressing, including Google Drive's opaque file IDs
 - Multi-provider registry with runtime switching, and stream-piped migration between any two providers
 - Paginated listing that follows continuation tokens past provider page caps
+- Recursive `walk()` and `delete_tree()`, and a concurrent `delete_many()` that reports per-path outcomes instead of failing the batch
+- Server-side `copy()` and `move()` on every adapter, so the bytes never travel through your process
 
 **Uploads**
 - Resumable chunked uploads with 256 KiB alignment, progress callbacks, and network-failure resumption
 - Automatic MIME detection, with per-upload overrides
-- Presigned URLs for S3-compatible backends, so a browser can fetch without proxying bytes through you
+- Signed URLs for S3-compatible backends, so a browser can fetch without proxying bytes through you
 
 **Security**
 - OAuth 2.0 with PKCE (RFC 7636) and CSRF state, using the non-restricted `drive.file` scope so you never enter Google's Restricted Scope assessment
@@ -244,8 +312,9 @@ FastAPI / Django / Next.js / Express
 ## Testing and verification
 
 ```
-TypeScript   193 tests      tsc --strict
-Python       224 tests      mypy --strict, ruff
+TypeScript   374 tests      tsc --strict
+Python       361 tests      mypy --strict, ruff
+Integration   38 tests      live MinIO and WebDAV servers
 Interop       13 tests      both SDKs, same live servers
 ```
 
@@ -254,6 +323,7 @@ Every adapter is exercised against a real server rather than a mock. Each of the
 - Object keys containing `#` or `?` were silently truncated, so `draft#2.pdf` and `draft#3.pdf` overwrote each other
 - SigV4 signatures were rejected when a caller passed a canonically-cased header
 - Google Drive queries broke on any filename containing an apostrophe
+- S3 server-side copy truncated the copy source at a `#`, so `copy("draft#2.pdf", ...)` reported the object missing
 
 <table>
 <tr><th>TypeScript</th><th>Python</th></tr>
@@ -305,6 +375,8 @@ byoc/
 │   ├── google-drive/           # OAuth PKCE, virtual paths, resumable uploads
 │   ├── s3-compatible/          # SigV4 signer, R2 / S3 / MinIO client
 │   ├── webdav/                 # Nextcloud, ownCloud, Synology adapter
+│   ├── local/                  # local filesystem, no credentials required
+│   ├── memory/                 # in-memory test double
 │   └── provider-sdk/           # certification harness for custom adapters
 ├── python/                     # Python SDK, published to PyPI as byoc-storage
 │   ├── src/byoc/               # client, paths, encryption, retry, providers/

@@ -8,6 +8,57 @@ version is below `1.0.0`, the public API may change between minor releases.
 
 ---
 
+## [0.3.0] - 2026-08-27
+
+The release that makes BYOC runnable without an account, and closes a set of
+operations that existed in one SDK but not the other.
+
+### Highlights
+
+**Two providers that need no credentials.** `@byoc/local` and `@byoc/memory` on npm, `LocalFileSystemProvider` and `MemoryProvider` in the Python package. Both pass the same behavioural suite as the network-backed adapters and both certify clean against the provider compliance harness. Evaluating BYOC, developing offline, and unit-testing code that talks to storage no longer require signing up for anything.
+
+**`copy()` is reachable.** It was implemented on all three TypeScript adapters in 0.2.x and exposed by neither client, so no caller could reach any of it. Both clients now expose it, and the Python S3 and Google Drive adapters have real implementations rather than a capability flag with nothing behind it.
+
+**A conformance fixture for the operation surface.** The existing fixtures pin bytes, and an adapter missing a method still writes identical bytes for everything it does implement. `spec/fixtures/provider-operations.json` pins which operations and capabilities each adapter has, in both SDKs, so this class of divergence fails CI instead of shipping.
+
+### Added
+
+- `@byoc/local` / `LocalFileSystemProvider`: files on a local disk or mounted volume, with paths confined to the configured root
+- `@byoc/memory` / `MemoryProvider`: an in-memory test double with `snapshot()`, `clear()`, and a configurable stream chunk size
+- `copy()` on both clients, capability-gated like `move()`
+- `walk()` on both clients: every object beneath a path, descending into folders
+- `delete_tree()`: recursive delete, children before parents, failures collected rather than aborting
+- `delete_many()`: concurrent batch delete returning per-path outcomes, because a partial delete is the common real case
+- `signed_url()` / `getSignedUrl()` on both clients, gated on `public_urls`. It existed only on the S3 adapter before
+- `copy()` and `move()` on the Python S3 adapter, using `x-amz-copy-source`
+- `copy()` and `move()` on the Python Google Drive adapter, using `files.copy` and a parent-list `PATCH`
+- `spec/fixtures/provider-operations.json`, and the conformance suites that read it in both SDKs
+- Both new adapters accept an async iterator as upload input, making good on what `StorageInput` has always declared
+
+### Fixed
+
+- **S3 server-side copy truncated the copy source at a `#` or `?`.** `copyObject` built the `x-amz-copy-source` header with `encodeURI`, which leaves both characters intact, so copying `draft#2.pdf` asked S3 for `draft` and reported the object missing. The header is now RFC 3986 encoded per segment, the same rule the object URL already followed. Verified against MinIO in both SDKs.
+- **The Python client dropped a provider that defined `__len__` while it was empty.** Registration tested the adapter for truthiness rather than `is not None`, so an empty `MemoryProvider` failed to register and the client reported that no provider had been supplied.
+- **`S3CompatibleProvider` and `GoogleDriveProvider` in Python declared `server_side_copy=True` with no `copy` method.** Callers who feature-detected on the capability got an `AttributeError` instead of a clean `CapabilityUnsupportedError`.
+- **The in-memory provider did not report nested keys as folders**, unlike S3, which returns them as `CommonPrefixes`. Anything below the first level was invisible to a tree walk, so `delete_tree()` reported complete success while leaving those objects in place. Caught before release by running the two providers through one shared suite.
+
+### Changed
+
+- Adapter manifests report `adapterVersion` / `adapter_version` `0.3.0`
+- The Python S3 adapter's `presigned_url()` is now `signed_url()`, matching what the client calls. The old name still works as an alias.
+- `AuthType` gained no new members: the `"local"` variant already existed and is now used
+
+### Known limitations
+
+- **E2EE still buffers the whole payload**, so client-side encryption and multi-gigabyte resumable uploads remain mutually exclusive. The design for a framed envelope is in [`docs/design/streaming-and-chunked-e2ee.md`](./docs/design/streaming-and-chunked-e2ee.md); the transport work is not in this release.
+- **Streaming uploads are still buffered by the three network adapters.** Only the local and in-memory providers consume an async iterator without collecting it first.
+- **`move` and `copy` of a filename containing `?` fail against wsgidav.** BYOC sends a correctly percent-encoded `Destination` header; wsgidav decodes it and then re-parses the result as a URL, truncating at the `?`. Confirmed with `curl` against the server directly, and reproducible in both SDKs. Other WebDAV servers may or may not share the defect.
+- **The Python SDK is async only.** A synchronous facade for Celery, Django, and scripts is planned.
+- **Two instances of the same provider type cannot be registered on one client**, since the registry is keyed by manifest id.
+- **Google Drive is not covered by CI**, as it needs a real account and a browser consent step.
+
+---
+
 ## [0.2.1] - 2026-08-26
 
 A packaging fix for the TypeScript SDK. No runtime behaviour changed, and the
@@ -104,6 +155,7 @@ Initial release: the TypeScript storage abstraction, with Google Drive, S3-compa
 
 ---
 
+[0.3.0]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.1.0

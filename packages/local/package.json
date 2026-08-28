@@ -1,7 +1,7 @@
 {
-  "name": "@byoc/provider-sdk",
+  "name": "@byoc/local",
   "version": "0.3.0",
-  "description": "BYOC Provider SDK \u2014 Certification suite and developer tools for building BYOC storage adapters",
+  "description": "Local filesystem storage adapter for BYOC. No account, no network, no credentials.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,37 +12,39 @@
       "default": "./dist/index.js"
     }
   },
-  "scripts": {
-    "build": "tsc -b",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo"
-  },
-  "dependencies": {
-    "@byoc/core": "^0.3.0"
-  },
-  "keywords": [
-    "byoc",
-    "sdk",
-    "compliance",
-    "certification",
-    "storage-adapter"
-  ],
-  "author": "Ajay Ramineni",
-  "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
-    "directory": "packages/provider-sdk"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
   "files": [
     "dist",
     "!dist/tsconfig.tsbuildinfo",
     "README.md",
     "LICENSE"
   ],
-  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/provider-sdk#readme",
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@byoc/core": "^0.3.0",
+    "@types/node": ">=20"
+  },
+  "keywords": [
+    "byoc",
+    "storage",
+    "filesystem",
+    "local",
+    "self-hosted",
+    "node"
+  ],
+  "author": "Ajay Ramineni",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
+    "directory": "packages/local"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/local#readme",
   "bugs": {
     "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
   },

@@ -9,7 +9,10 @@ import type {
   StorageOutput,
   StorageQuota,
   UploadOptions,
-  BackupOptions
+  BackupOptions,
+  BatchDeleteReport,
+  BatchFailure,
+  SignedUrlOptions
 } from "../types/storage.js";
 import { normalizeVirtualPath } from "../paths/resolver.js";
 import { BYOCErrorCode } from "../errors/codes.js";
@@ -339,6 +342,24 @@ export class BYOC {
   /**
    * Move an object from source to destination virtual path.
    */
+  /**
+   * Copies an object. Every current adapter performs this server-side, so the
+   * bytes never travel through this process.
+   */
+  public async copy(source: string, destination: string): Promise<void> {
+    if (!this.currentProvider.copy) {
+      throw new StorageError({
+        code: BYOCErrorCode.CAPABILITY_UNSUPPORTED,
+        message: `Provider '${this.manifest().name}' does not support native copy operations.`,
+        provider: this.manifest().id,
+        retryable: false
+      });
+    }
+    const normSource = normalizeVirtualPath(source);
+    const normDest = normalizeVirtualPath(destination);
+    return this.currentProvider.copy(normSource, normDest);
+  }
+
   public async move(source: string, destination: string): Promise<void> {
     if (!this.currentProvider.move) {
       throw new StorageError({
@@ -367,6 +388,133 @@ export class BYOC {
       });
     }
     return this.currentProvider.quota();
+  }
+
+  /**
+   * A time-limited URL a browser can use directly, without proxying bytes.
+   *
+   * Only providers reporting `publicUrls` can issue one. Google Drive and
+   * WebDAV cannot, so they throw rather than returning a URL that would need
+   * the caller's credentials to be useful.
+   */
+  public async getSignedUrl(path: string, options?: SignedUrlOptions): Promise<string> {
+    const capabilities = await this.capabilities();
+    const signer = (this.currentProvider as { getSignedUrl?: unknown }).getSignedUrl;
+
+    if (!capabilities.publicUrls || typeof signer !== "function") {
+      throw new StorageError({
+        code: BYOCErrorCode.CAPABILITY_UNSUPPORTED,
+        message: `Provider '${this.manifest().name}' cannot issue signed URLs.`,
+        provider: this.manifest().id,
+        retryable: false
+      });
+    }
+
+    return (signer as (p: string, o?: SignedUrlOptions) => string).call(
+      this.currentProvider,
+      normalizeVirtualPath(path),
+      options
+    );
+  }
+
+  /**
+   * Yields every object beneath `path`, descending into folders.
+   *
+   * `list` returns one level, which is right for rendering a file browser and
+   * wrong for "everything under here". This walks the tree breadth-first,
+   * yielding folders before their contents.
+   *
+   * It is built on `list`, so it costs one call per folder.
+   */
+  public async *walk(path?: string): AsyncGenerator<StorageObject> {
+    const pending: (string | undefined)[] = [normalizeVirtualPath(path ?? "") || undefined];
+
+    while (pending.length > 0) {
+      const current = pending.shift();
+      for (const item of await this.currentProvider.list(current)) {
+        yield item;
+        if (item.type === "folder") pending.push(item.path);
+      }
+    }
+  }
+
+  /**
+   * Deletes everything under `path`, then `path` itself.
+   *
+   * Children are deleted before their parents, so a provider that refuses to
+   * remove a non-empty folder still ends up with an empty one to remove.
+   * Failures are collected rather than aborting the walk.
+   */
+  public async deleteTree(path: string): Promise<BatchDeleteReport> {
+    const normalized = normalizeVirtualPath(path);
+    if (!normalized) {
+      throw new StorageError({
+        code: BYOCErrorCode.INVALID_INPUT,
+        message: "Delete tree requires a valid non-empty path.",
+        provider: this.manifest().id,
+        retryable: false
+      });
+    }
+
+    const descendants: StorageObject[] = [];
+    for await (const item of this.walk(normalized)) descendants.push(item);
+
+    // Deepest first: a folder must be emptied before it can be removed.
+    descendants.sort(
+      (a, b) => b.path.split("/").length - a.path.split("/").length
+    );
+
+    return this.deleteMany([...descendants.map((item) => item.path), normalized], 1);
+  }
+
+  /**
+   * Deletes several paths, reporting per-path outcomes.
+   *
+   * One failure does not abort the rest: a locked or already-removed object is
+   * the common case, and the caller needs to know which paths survived rather
+   * than losing the whole batch.
+   */
+  public async deleteMany(paths: string[], concurrency = 8): Promise<BatchDeleteReport> {
+    if (concurrency < 1) {
+      throw new StorageError({
+        code: BYOCErrorCode.INVALID_INPUT,
+        message: "deleteMany concurrency must be at least 1.",
+        provider: this.manifest().id,
+        retryable: false
+      });
+    }
+
+    const deleted: string[] = [];
+    const failed: BatchFailure[] = [];
+    const queue = [...paths];
+
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const target = queue.shift();
+        if (target === undefined) return;
+        try {
+          await this.delete(target);
+          deleted.push(target);
+        } catch (error) {
+          failed.push({
+            path: target,
+            error: (error as Error).message,
+            code: (error as StorageError).code ?? BYOCErrorCode.PROVIDER_UNAVAILABLE
+          });
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, queue.length || 1) }, worker)
+    );
+
+    return {
+      deleted,
+      failed,
+      total: deleted.length + failed.length,
+      allSucceeded: failed.length === 0
+    };
   }
 
   /**

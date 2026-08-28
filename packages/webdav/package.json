@@ -1,6 +1,6 @@
 {
   "name": "@byoc/webdav",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Universal WebDAV storage adapter for Nextcloud, ownCloud, and Synology NAS",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@byoc/core": "^0.2.1"
+    "@byoc/core": "^0.3.0"
   },
   "keywords": [
     "byoc",

@@ -217,6 +217,46 @@ class DriveHttpClient:
             raise self.map_error(response)
         return str(response.json()["id"])
 
+    async def copy_file(
+        self, file_id: str, new_name: str, parent_id: str
+    ) -> dict[str, Any]:
+        """Server-side copy. Drive duplicates the blob without re-uploading."""
+        body = {"name": new_name, "parents": [parent_id]}
+        response = await self._http().post(
+            f"{API_BASE}/files/{file_id}/copy",
+            params={"fields": FILE_FIELDS},
+            headers=await self._headers({"Content-Type": "application/json"}),
+            content=json.dumps(body).encode("utf-8"),
+        )
+        if response.is_error:
+            raise self.map_error(response)
+        resource: dict[str, Any] = response.json()
+        return resource
+
+    async def move_file(
+        self, file_id: str, new_parent_id: str, old_parent_id: str, new_name: str
+    ) -> dict[str, Any]:
+        """Reparent and rename in one PATCH.
+
+        Drive models a move as an edit to the file's parent list rather than a
+        rename, so this is instantaneous regardless of file size.
+        """
+        params = {
+            "addParents": new_parent_id,
+            "removeParents": old_parent_id,
+            "fields": FILE_FIELDS,
+        }
+        response = await self._http().patch(
+            f"{API_BASE}/files/{file_id}",
+            params=params,
+            headers=await self._headers({"Content-Type": "application/json"}),
+            content=json.dumps({"name": new_name}).encode("utf-8"),
+        )
+        if response.is_error:
+            raise self.map_error(response)
+        resource: dict[str, Any] = response.json()
+        return resource
+
     async def delete_file(self, file_id: str) -> None:
         response = await self._http().delete(
             f"{API_BASE}/files/{file_id}", headers=await self._headers()

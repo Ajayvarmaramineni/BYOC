@@ -89,7 +89,7 @@ class GoogleDriveProvider:
             category="personal-cloud",
             authentication="oauth2",
             supports_user_owned_storage=True,
-            adapter_version="0.2.0",
+            adapter_version="0.3.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:
@@ -232,6 +232,41 @@ class GoogleDriveProvider:
             provider_id=folder_id,
             type="folder",
         )
+
+    async def copy(self, source: str, destination: str) -> None:
+        """Server-side copy into ``destination``, creating parents as needed."""
+        source_norm = normalize_virtual_path(source)
+        dest_norm = normalize_virtual_path(destination)
+        if not source_norm or not dest_norm:
+            raise InvalidInputError(
+                "Copy requires both a source and a destination path.", provider=PROVIDER_ID
+            )
+
+        source_id = await self.resolver.resolve_file_id(source_norm)
+        dest_parent_id = await self.resolver.resolve_parent_folder_id(dest_norm, create=True)
+
+        copied = await self.http.copy_file(source_id, get_basename(dest_norm), dest_parent_id)
+        self.resolver.cache.set(dest_norm, str(copied["id"]))
+
+    async def move(self, source: str, destination: str) -> None:
+        """Reparent the file server-side, so no bytes are transferred."""
+        source_norm = normalize_virtual_path(source)
+        dest_norm = normalize_virtual_path(destination)
+        if not source_norm or not dest_norm:
+            raise InvalidInputError(
+                "Move requires both a source and a destination path.", provider=PROVIDER_ID
+            )
+
+        source_id = await self.resolver.resolve_file_id(source_norm)
+        old_parent_id = await self.resolver.resolve_parent_folder_id(source_norm, create=False)
+        new_parent_id = await self.resolver.resolve_parent_folder_id(dest_norm, create=True)
+
+        await self.http.move_file(
+            source_id, new_parent_id, old_parent_id, get_basename(dest_norm)
+        )
+        # The old path no longer resolves; the new one now points at the same id.
+        self.resolver.invalidate(source_norm)
+        self.resolver.cache.set(dest_norm, source_id)
 
     async def quota(self) -> StorageQuota:
         return await self.http.get_quota()
