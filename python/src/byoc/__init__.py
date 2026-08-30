@@ -46,6 +46,8 @@ from .providers.gdrive import (
     GoogleDriveProvider,
     GoogleDriveScope,
 )
+from .providers.local import LocalFileSystemProvider
+from .providers.memory import MemoryProvider
 from .retry import with_retry
 from .types import (
     AuthType,
@@ -64,7 +66,7 @@ from .types import (
     UploadProgress,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "AsyncBYOC",
@@ -83,6 +85,8 @@ __all__ = [
     "GoogleDriveProvider",
     "GoogleDriveScope",
     "InvalidInputError",
+    "LocalFileSystemProvider",
+    "MemoryProvider",
     "MigrationFileResult",
     "MigrationProgress",
     "MigrationReport",

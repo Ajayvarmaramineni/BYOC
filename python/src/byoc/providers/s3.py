@@ -103,7 +103,7 @@ class S3CompatibleProvider:
             category="developer-cloud",
             authentication="access-key",
             supports_user_owned_storage=False,
-            adapter_version="0.2.0",
+            adapter_version="0.3.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:
@@ -165,7 +165,7 @@ class S3CompatibleProvider:
         """
         return f"{self._bucket_base_url()}/{encode_path_segments(key)}"
 
-    def presigned_url(
+    def signed_url(
         self, path: str, *, method: str = "GET", expires_in_seconds: int = 3600
     ) -> str:
         """Time-limited URL a browser can use directly, without proxying bytes."""
@@ -177,6 +177,9 @@ class S3CompatibleProvider:
             method=method,
             expires_in_seconds=expires_in_seconds,
         )
+
+    # Retained under its 0.2.x name; `signed_url` is what the client calls.
+    presigned_url = signed_url
 
     def _sign(
         self,
@@ -330,6 +333,29 @@ class S3CompatibleProvider:
                 raise self._map_error(response, response.text)
 
         await with_retry(send)
+
+    async def copy(self, source: str, destination: str) -> None:
+        """Server-side copy. The bytes never travel through this process."""
+        source_key = self._to_key(source)
+        dest_url = self.object_url(self._to_key(destination))
+
+        # S3 wants the copy source as `/bucket/key`, URL-encoded. Encoding it
+        # per segment is what keeps a `#` or `?` in the filename from
+        # truncating the source key, exactly as it does for the object URL.
+        copy_source = f"/{self.bucket}/{encode_path_segments(source_key)}"
+
+        async def send() -> None:
+            signed = self._sign("PUT", dest_url, {"x-amz-copy-source": copy_source})
+            response = await self._http().request("PUT", dest_url, headers=signed)
+            if response.is_error:
+                raise self._map_error(response, response.text)
+
+        await with_retry(send)
+
+    async def move(self, source: str, destination: str) -> None:
+        """Copy then delete. S3 has no atomic rename, so this is two calls."""
+        await self.copy(source, destination)
+        await self.delete(source)
 
     async def metadata(self, path: str) -> StorageObject:
         key = self._to_key(path)

@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/byoc-storage?style=flat-square&color=3776AB&logo=pypi&logoColor=white)](https://pypi.org/project/byoc-storage/)
 [![Python](https://img.shields.io/pypi/pyversions/byoc-storage?style=flat-square&color=3776AB)](https://pypi.org/project/byoc-storage/)
-[![Tests](https://img.shields.io/badge/Tests-224%20Passed-brightgreen?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC)
+[![Tests](https://img.shields.io/badge/Tests-361%20Passed-brightgreen?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC)
 [![Types](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC/blob/main/LICENSE)
 
@@ -45,6 +45,23 @@ import byoc
 
 ## Usage
 
+Start with no credentials at all. `LocalFileSystemProvider` and
+`MemoryProvider` are bundled, need no account and no network, and behave like
+every other provider:
+
+```python
+from byoc import AsyncBYOC, LocalFileSystemProvider
+
+storage = AsyncBYOC(provider=LocalFileSystemProvider("./storage"))
+
+async with storage:
+    await storage.write_text("documents/welcome.md", "# Hello from BYOC!")
+    content = await storage.read_text("documents/welcome.md")
+```
+
+Swap in `S3CompatibleProvider`, `WebDAVProvider`, or `GoogleDriveProvider` and
+none of the calling code changes:
+
 ```python
 import os
 from byoc import AsyncBYOC
@@ -64,6 +81,25 @@ async with storage:
     await storage.write_text("documents/welcome.md", "# Hello from BYOC!")
     content = await storage.read_text("documents/welcome.md")
 ```
+
+### Testing without a cloud
+
+`MemoryProvider` is a test double that behaves like a real provider, so your
+tests exercise the same code path production does:
+
+```python
+from byoc import AsyncBYOC, MemoryProvider
+
+async def test_report_is_archived():
+    provider = MemoryProvider()
+    await archive_report(AsyncBYOC(provider=provider), report)
+
+    assert provider.snapshot() == {"reports/q3.pdf": b"..."}
+```
+
+Like S3, it models a flat object store and reports `folders=False`. If your
+production provider has real folders, use `LocalFileSystemProvider` against a
+`tmp_path` instead.
 
 ### Multiple providers and migration
 

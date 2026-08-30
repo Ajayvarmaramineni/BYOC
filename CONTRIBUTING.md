@@ -11,6 +11,7 @@ By participating you agree to the [Code of Conduct](./CODE_OF_CONDUCT.md).
 
 ```text
 packages/          TypeScript SDK, published to npm as @byoc/*
+                   (local/ and memory/ need no credentials -- develop against those)
 python/            Python SDK, published to PyPI as byoc-storage
 spec/fixtures/     conformance vectors shared by both SDKs
 docs/              setup and integration guides
@@ -49,8 +50,8 @@ Without activating the virtualenv, call the binaries directly: `.venv/bin/pytest
 ## Running the full suite
 
 ```
-TypeScript   193 tests   npm test && npm run typecheck
-Python       224 tests   pytest && mypy src && ruff check .
+TypeScript   374 tests   npm test && npm run typecheck
+Python       361 tests   pytest && mypy src && ruff check .
 ```
 
 Integration and interop tests skip automatically when no server is reachable, so
@@ -106,6 +107,14 @@ external state:
 | `provider-metadata.json` | metadata key names written into provider storage |
 | `sigv4.json` | AWS request signing |
 | `pkce.json` | the OAuth challenge derivation |
+| `provider-operations.json` | which operations and capabilities each adapter has |
+
+`provider-operations.json` is the odd one out: it pins no bytes. The byte-level
+fixtures cannot catch an adapter that is simply missing a method, because the
+bytes it writes for everything else are still identical. That blind spot is how
+0.2.x shipped `copy()` on three TypeScript adapters and no Python ones, with
+neither client exposing it at all. Adding an operation or an adapter means
+updating that fixture and both SDKs together.
 
 **Changing an expectation in a fixture is a breaking change.** It can make
 previously written files unreadable. Bump the format version, as

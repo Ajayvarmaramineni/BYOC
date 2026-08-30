@@ -1,7 +1,7 @@
 {
-  "name": "@byoc/provider-sdk",
+  "name": "@byoc/memory",
   "version": "0.3.0",
-  "description": "BYOC Provider SDK \u2014 Certification suite and developer tools for building BYOC storage adapters",
+  "description": "In-memory BYOC storage adapter: a test double that behaves like a real provider.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,6 +12,12 @@
       "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
@@ -21,28 +27,23 @@
   },
   "keywords": [
     "byoc",
-    "sdk",
-    "compliance",
-    "certification",
-    "storage-adapter"
+    "storage",
+    "in-memory",
+    "testing",
+    "test-double",
+    "mock"
   ],
   "author": "Ajay Ramineni",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
-    "directory": "packages/provider-sdk"
+    "directory": "packages/memory"
   },
   "publishConfig": {
     "access": "public"
   },
-  "files": [
-    "dist",
-    "!dist/tsconfig.tsbuildinfo",
-    "README.md",
-    "LICENSE"
-  ],
-  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/provider-sdk#readme",
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/memory#readme",
   "bugs": {
     "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
   },

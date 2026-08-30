@@ -7,16 +7,19 @@ collections -- never surface here.
 
 from __future__ import annotations
 
+import asyncio
 import mimetypes
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from datetime import datetime, timezone
 
-from .errors import CapabilityUnsupportedError, InvalidInputError
+from .errors import CapabilityUnsupportedError, InvalidInputError, StorageError
 from .logging import BYOCLogger, SilentLogger
 from .migration import MigrationReport, ProgressCallback, migrate
 from .paths import normalize_virtual_path
 from .types import (
     BackupOptions,
+    BatchDeleteReport,
+    BatchFailure,
     BYOCProvider,
     ConflictStrategy,
     ProviderCapabilities,
@@ -62,7 +65,10 @@ class AsyncBYOC:
         registry: dict[str, BYOCProvider] = {}
         ordered: list[BYOCProvider] = []
 
-        for adapter in [*( [provider] if provider else [] ), *(providers or [])]:
+        # `is not None`, not truthiness: an adapter is free to define __len__
+        # or __bool__, and an empty one must still register.
+        supplied: list[BYOCProvider] = [] if provider is None else [provider]
+        for adapter in [*supplied, *(providers or [])]:
             ordered.append(adapter)
             registry[adapter.manifest().id] = adapter
 
@@ -261,6 +267,22 @@ class AsyncBYOC:
             self._require_path(source, "Move"), self._require_path(destination, "Move")
         )
 
+    async def copy(self, source: str, destination: str) -> None:
+        """Copy an object, if the active provider supports it natively.
+
+        Every current adapter copies server-side, so the bytes never travel
+        through this process.
+        """
+        copier = getattr(self._current, "copy", None)
+        if copier is None:
+            raise CapabilityUnsupportedError(
+                f"Provider '{self.manifest().name}' does not support native copy operations.",
+                provider=self.manifest().id,
+            )
+        await copier(
+            self._require_path(source, "Copy"), self._require_path(destination, "Copy")
+        )
+
     async def get_quota(self) -> StorageQuota:
         """Report storage quota, if the active provider exposes it."""
         quota = getattr(self._current, "quota", None)
@@ -271,6 +293,96 @@ class AsyncBYOC:
             )
         result: StorageQuota = await quota()
         return result
+
+    async def signed_url(
+        self, path: str, *, method: str = "GET", expires_in_seconds: int = 3600
+    ) -> str:
+        """A time-limited URL a browser can use directly, without proxying bytes.
+
+        Only providers reporting ``public_urls`` can issue one. Google Drive
+        and WebDAV cannot, so they raise rather than returning a URL that
+        would need the caller's credentials to be useful.
+        """
+        signer = getattr(self._current, "signed_url", None)
+        if not self.capabilities().public_urls or signer is None:
+            raise CapabilityUnsupportedError(
+                f"Provider '{self.manifest().name}' cannot issue signed URLs.",
+                provider=self.manifest().id,
+            )
+        url: str = signer(
+            self._require_path(path, "Signed URL"),
+            method=method,
+            expires_in_seconds=expires_in_seconds,
+        )
+        return url
+
+    # -- recursive and batch operations ------------------------------------
+
+    async def walk(self, path: str | None = None) -> AsyncIterator[StorageObject]:
+        """Yield every object beneath ``path``, descending into folders.
+
+        ``list`` returns one level, which is right for rendering a file
+        browser and wrong for "everything under here". This walks the tree
+        breadth-first, yielding folders before their contents.
+
+        It is built on ``list``, so it costs one call per folder. On a flat
+        provider like S3 or the in-memory one there are no folders to descend
+        into, so it is a single call.
+        """
+        pending = [normalize_virtual_path(path) or None]
+
+        while pending:
+            current = pending.pop(0)
+            for item in await self._current.list(current):
+                yield item
+                if item.type == "folder":
+                    pending.append(item.path)
+
+    async def delete_tree(self, path: str) -> BatchDeleteReport:
+        """Delete everything under ``path``, then ``path`` itself.
+
+        Children are deleted before their parents, so a provider that refuses
+        to remove a non-empty folder still ends up with an empty one to
+        remove. Failures are collected rather than aborting the walk.
+        """
+        normalized = self._require_path(path, "Delete tree")
+
+        # Deepest first: a folder must be emptied before it can be removed.
+        descendants = [item async for item in self.walk(normalized)]
+        descendants.sort(key=lambda item: item.path.count("/"), reverse=True)
+
+        targets = [item.path for item in descendants] + [normalized]
+        return await self.delete_many(targets, concurrency=1)
+
+    async def delete_many(
+        self, paths: Sequence[str], *, concurrency: int = 8
+    ) -> BatchDeleteReport:
+        """Delete several paths, reporting per-path outcomes.
+
+        One failure does not abort the rest: a locked or already-removed
+        object is the common case, and the caller needs to know which paths
+        survived rather than losing the whole batch.
+        """
+        if concurrency < 1:
+            raise InvalidInputError(
+                "delete_many concurrency must be at least 1.", provider=self.manifest().id
+            )
+
+        report = BatchDeleteReport()
+        limit = asyncio.Semaphore(concurrency)
+
+        async def remove(target: str) -> None:
+            async with limit:
+                try:
+                    await self.delete(target)
+                    report.deleted.append(target)
+                except StorageError as error:
+                    report.failed.append(
+                        BatchFailure(path=target, error=str(error), code=error.code)
+                    )
+
+        await asyncio.gather(*(remove(target) for target in paths))
+        return report
 
     # -- high-level helpers -------------------------------------------------
 

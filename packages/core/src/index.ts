@@ -17,7 +17,10 @@ export type {
   StorageQuota,
   UploadOptions,
   UploadProgress,
-  BackupOptions
+  BackupOptions,
+  BatchDeleteReport,
+  BatchFailure,
+  SignedUrlOptions
 } from "./types/storage.js";
 
 // Errors

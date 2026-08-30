@@ -94,6 +94,36 @@ class BackupOptions:
 
 
 @dataclass(frozen=True, slots=True)
+class BatchFailure:
+    """One path a batch operation could not complete, and why."""
+
+    path: str
+    error: str
+    code: str
+
+
+@dataclass(frozen=True, slots=True)
+class BatchDeleteReport:
+    """Outcome of a multi-path delete.
+
+    A batch is reported rather than raising on the first failure, because a
+    partial delete is the common real case: one object is locked or already
+    gone while the rest succeed, and the caller needs to know which.
+    """
+
+    deleted: list[str] = field(default_factory=list)
+    failed: list[BatchFailure] = field(default_factory=list)
+
+    @property
+    def total(self) -> int:
+        return len(self.deleted) + len(self.failed)
+
+    @property
+    def all_succeeded(self) -> bool:
+        return not self.failed
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderManifest:
     """Static metadata identifying a provider adapter."""
 

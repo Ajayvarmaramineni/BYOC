@@ -1,6 +1,6 @@
 {
   "name": "@byoc/s3-compatible",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Universal S3-compatible storage adapter for Cloudflare R2, AWS S3, MinIO, and Wasabi",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@byoc/core": "^0.2.1"
+    "@byoc/core": "^0.3.0"
   },
   "keywords": [
     "byoc",

@@ -91,3 +91,30 @@ export interface StorageQuota {
   /** Remaining available storage in bytes (if known) */
   readonly available?: number;
 }
+
+/** One path a batch operation could not complete, and why. */
+export interface BatchFailure {
+  readonly path: string;
+  readonly error: string;
+  readonly code: string;
+}
+
+/**
+ * Outcome of a multi-path delete.
+ *
+ * A batch is reported rather than throwing on the first failure, because a
+ * partial delete is the common real case: one object is locked or already
+ * gone while the rest succeed, and the caller needs to know which.
+ */
+export interface BatchDeleteReport {
+  readonly deleted: string[];
+  readonly failed: BatchFailure[];
+  readonly total: number;
+  readonly allSucceeded: boolean;
+}
+
+/** Options for a time-limited signed URL. */
+export interface SignedUrlOptions {
+  readonly method?: string;
+  readonly expiresInSeconds?: number;
+}

@@ -8,9 +8,30 @@ import {
 } from "@byoc/google-drive";
 import { S3CompatibleProvider } from "@byoc/s3-compatible";
 import { WebDAVProvider } from "@byoc/webdav";
+import { LocalFileSystemProvider } from "@byoc/local";
+import { MemoryProvider } from "@byoc/memory";
 
 async function main() {
   console.log("=== BYOC (Bring Your Own Cloud) Ecosystem Demo ===\n");
+
+  // 0. A real round trip, with no account and no network.
+  //    Everything below this block uses placeholder credentials and only
+  //    demonstrates shapes; this part genuinely reads and writes.
+  console.log("0. Real storage round trip, no credentials required:");
+  const scratch = new BYOC({ provider: new MemoryProvider() });
+  await scratch.connect();
+
+  await scratch.writeText("reports/q3.md", "# Q3 results");
+  await scratch.copy("reports/q3.md", "reports/q3-backup.md");
+  console.log("   read back:  ", await scratch.readText("reports/q3-backup.md"));
+
+  const walked: string[] = [];
+  for await (const item of scratch.walk("reports")) walked.push(item.path);
+  console.log("   walk:       ", walked.join(", "));
+
+  const removed = await scratch.deleteTree("reports");
+  console.log(`   deleteTree:  removed ${removed.deleted.length}, failed ${removed.failed.length}`);
+  console.log("   Swap MemoryProvider for LocalFileSystemProvider and it writes real files.\n");
 
   // 1. Generate PKCE Security Parameters
   const codeVerifier = generateCodeVerifier(64);
@@ -54,9 +75,12 @@ async function main() {
     rootFolder: "MyApp"
   });
 
-  // 3. Initialize Universal BYOC Client with all 3 Clouds
+  // Local disk: no account, no network, no credentials.
+  const localDisk = new LocalFileSystemProvider({ rootDirectory: "./byoc-demo-storage" });
+
+  // 3. Initialize Universal BYOC Client with every ownership model
   const storage = new BYOC({
-    providers: [googleDrive, cloudflareR2, nextcloud],
+    providers: [googleDrive, cloudflareR2, nextcloud, localDisk],
     defaultProviderId: "google-drive"
   });
 
@@ -77,6 +101,9 @@ async function main() {
   console.log("   Switched active provider to:", storage.manifest().name, `(${storage.manifest().category})`);
 
   storage.useProvider("webdav");
+  console.log("   Switched active provider to:", storage.manifest().name, `(${storage.manifest().category})`);
+
+  storage.useProvider("local");
   console.log("   Switched active provider to:", storage.manifest().name, `(${storage.manifest().category})`);
 
   console.log("\n5. Ready to migrate data between user clouds and developer clouds with zero code changes!");
