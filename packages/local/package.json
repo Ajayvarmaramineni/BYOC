@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "@byoc/core": "^0.3.0",
-    "@types/node": ">=20"
+    "@types/node": ">=26"
   },
   "keywords": [
     "byoc",
