@@ -48,6 +48,128 @@ export class ResumableUploader {
   }
 
   /**
+   * Streams an async iterator into a resumable session without buffering it.
+   *
+   * Drive accepts `Content-Range: bytes {start}-{end}/*` while the total is
+   * still unknown, and requires the real total on the final chunk. That forces
+   * a one-chunk lookahead: a chunk cannot be sent as non-final until we know
+   * more data follows, and cannot be sent as final until we know none does.
+   * Two buffers alternate so the reader always has somewhere to write while a
+   * full chunk waits to be classified.
+   *
+   * Memory is therefore bounded at two chunks, not at the object size.
+   */
+  public async uploadStream(
+    metadata: Record<string, unknown>,
+    source: AsyncIterable<Uint8Array>,
+    mimeType: string,
+    chunkSize: number = DEFAULT_CHUNK_SIZE,
+    onProgress?: (progress: UploadProgress) => void
+  ): Promise<DriveFileResource> {
+    const aligned = Math.max(
+      GOOGLE_DRIVE_CHUNK_ALIGNMENT,
+      Math.floor(chunkSize / GOOGLE_DRIVE_CHUNK_ALIGNMENT) * GOOGLE_DRIVE_CHUNK_ALIGNMENT
+    );
+    const sessionUri = await this.initiateSession(metadata, 0, mimeType, true);
+
+    const buffers = [new Uint8Array(aligned), new Uint8Array(aligned)];
+    let current = 0;
+    let filled = 0;
+    let held: number | null = null;
+    let offset = 0;
+    let finalResource: DriveFileResource | undefined;
+
+    const send = async (
+      index: number,
+      length: number,
+      total: number | null
+    ): Promise<void> => {
+      if (length === 0 && total === null) return;
+
+      const marker = total === null ? "*" : String(total);
+      const range =
+        length === 0
+          ? `bytes */${total}`
+          : `bytes ${offset}-${offset + length - 1}/${marker}`;
+
+      const accessToken = await this.oauth.getAccessToken();
+      const response = await fetch(sessionUri, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Range": range
+        },
+        body: buffers[index]!.subarray(0, length)
+      });
+
+      if (response.status === 200 || response.status === 201) {
+        offset += length;
+        finalResource = (await response.json()) as DriveFileResource;
+        onProgress?.({ bytesUploaded: offset, totalBytes: offset, percentage: 100 });
+        return;
+      }
+
+      if (response.status !== 308) {
+        let data: unknown;
+        try {
+          data = await response.json();
+        } catch {
+          data = await response.text();
+        }
+        throw mapGoogleDriveError({ status: response.status, data });
+      }
+
+      // Trust the server's committed range over our own bookkeeping.
+      const committed = response.headers.get("Range");
+      offset = committed ? Number(committed.split("-").pop()) + 1 : offset + length;
+      onProgress?.({ bytesUploaded: offset, totalBytes: undefined, percentage: undefined });
+    };
+
+    for await (const chunk of source) {
+      const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+      let position = 0;
+      while (position < bytes.byteLength) {
+        const take = Math.min(aligned - filled, bytes.byteLength - position);
+        buffers[current]!.set(bytes.subarray(position, position + take), filled);
+        filled += take;
+        position += take;
+
+        if (filled === aligned) {
+          // A full buffer cannot be final while more data may follow, so
+          // release the previously held one and hold this instead.
+          if (held !== null) await send(held, aligned, null);
+          held = current;
+          current = 1 - current;
+          filled = 0;
+        }
+      }
+    }
+
+    // The stream is exhausted, so whatever remains is genuinely final.
+    if (held !== null && filled === 0) {
+      await send(held, aligned, offset + aligned);
+    } else if (held !== null) {
+      await send(held, aligned, null);
+      await send(current, filled, offset + filled);
+    } else {
+      await send(current, filled, filled);
+    }
+
+    if (!finalResource) {
+      throw mapGoogleDriveError({
+        status: 500,
+        data: {
+          error: {
+            message:
+              "Google Drive accepted every chunk but never returned the file resource."
+          }
+        }
+      });
+    }
+    return finalResource;
+  }
+
+  /**
    * Opens a resumable session without sending any bytes, and returns its URI.
    *
    * The session URI is a bearer capability: Drive accepts chunks at it with no
@@ -68,7 +190,8 @@ export class ResumableUploader {
   private async initiateSession(
     metadata: Record<string, unknown>,
     totalBytes: number,
-    mimeType: string
+    mimeType: string,
+    unknownLength = false
   ): Promise<string> {
     const url = `${DRIVE_UPLOAD_BASE}/files?uploadType=resumable&fields=id,name,mimeType,size,parents,createdTime,modifiedTime,md5Checksum,appProperties`;
 
@@ -78,9 +201,13 @@ export class ResumableUploader {
       const headers = new Headers({
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Type": mimeType,
-        "X-Upload-Content-Length": String(totalBytes)
+        "X-Upload-Content-Type": mimeType
       });
+      // Declaring a length we do not have would make Drive reject the final
+      // chunk, so a stream simply omits the header.
+      if (!unknownLength) {
+        headers.set("X-Upload-Content-Length", String(totalBytes));
+      }
 
       const response = await fetch(url, {
         method: "POST",

@@ -112,11 +112,17 @@ Where streaming stands, per adapter:
 | :--- | :--- | :--- |
 | S3-compatible | streams (multipart) | streams (multipart) |
 | WebDAV | streams (chunked) | streams (chunked) |
-| Google Drive | **buffers** | **buffers** |
+| Google Drive | streams (resumable) | streams (resumable) |
 | Local, in-memory | streams | streams |
 
-**Do not claim end-to-end bounded memory for the adapters marked buffers.**
-Python's migration engine also still reads each file fully before writing it.
+Google Drive needs a one-chunk lookahead. Its resumable protocol accepts
+`Content-Range: bytes {start}-{end}/*` while the total is unknown but demands
+the real total on the final chunk, so a chunk cannot be classified until we
+know whether more data follows. Two buffers alternate, bounding memory at two
+chunks rather than at the object size.
+
+**Python's migration engine still reads each file fully before writing it**, so
+a migration is bounded by the largest file, not by the chunk size.
 
 ### Credential storage
 

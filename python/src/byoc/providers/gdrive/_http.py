@@ -33,6 +33,9 @@ FILE_FIELDS = (
 )
 
 # Drive requires resumable chunks to be a multiple of 256 KiB (except the last).
+_UPLOAD_FRAME_SIZE = 64 * 1024
+"""Bytes handed to httpx at a time. Small enough that CPython reuses the block."""
+
 CHUNK_ALIGNMENT = 256 * 1024
 DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024
 # Above this, upload resumably so a dropped connection does not restart from zero.
@@ -417,6 +420,121 @@ class DriveHttpClient:
         raise ProviderUnavailableError(
             "Resumable upload ended without a completion response.", provider="google-drive"
         )
+
+    async def stream_chunks(
+        self,
+        upload_url: str,
+        source: AsyncIterator[bytes],
+        *,
+        chunk_size: int = DEFAULT_CHUNK_SIZE,
+        on_progress: Callable[[UploadProgress], None] | None = None,
+    ) -> dict[str, Any]:
+        """Send an async iterator to a resumable session without buffering it.
+
+        Drive accepts ``Content-Range: bytes {start}-{end}/*`` while the total
+        is still unknown, and requires the real total on the final chunk. That
+        forces a one-chunk lookahead: a chunk cannot be sent as non-final until
+        we know more data follows, and cannot be sent as final until we know
+        none does. Two buffers alternate so the reader always has somewhere to
+        write while a full chunk waits to be classified.
+
+        Memory is therefore bounded at two chunks, not at the object size.
+        """
+        aligned = max(CHUNK_ALIGNMENT, (chunk_size // CHUNK_ALIGNMENT) * CHUNK_ALIGNMENT)
+
+        buffers = [bytearray(aligned), bytearray(aligned)]
+        views = [memoryview(buffers[0]), memoryview(buffers[1])]
+        current = 0
+        filled = 0
+
+        held: int | None = None  # index of a full buffer awaiting classification
+        offset = 0  # bytes Drive has committed
+
+        async def send(index: int, length: int, total: int | None) -> dict[str, Any] | None:
+            """PUT one chunk. ``total`` set means this is the final chunk."""
+            nonlocal offset
+            if length == 0 and total is None:
+                return None
+
+            end = offset + length - 1
+            marker = str(total) if total is not None else "*"
+            # An empty object has no byte range at all.
+            span = f"bytes */{total}" if length == 0 else f"bytes {offset}-{end}/{marker}"
+
+            async def framed() -> AsyncIterator[bytes]:
+                """Feed the chunk to httpx in small pieces.
+
+                httpx accepts only bytes or an iterable of them, so the chunk
+                cannot be handed over as a zero-copy view. Copying the whole
+                8 MiB chunk instead makes peak memory climb with object size,
+                because CPython does not reuse freed blocks that large.
+                Slicing it keeps every allocation in the size class the
+                allocator does reuse. Content-Length is explicit, or httpx
+                falls back to chunked transfer-encoding.
+                """
+                for cursor in range(0, length, _UPLOAD_FRAME_SIZE):
+                    stop = min(cursor + _UPLOAD_FRAME_SIZE, length)
+                    yield bytes(views[index][cursor:stop])
+
+            response = await self._http().put(
+                upload_url,
+                headers={"Content-Length": str(length), "Content-Range": span},
+                content=framed(),
+            )
+
+            if response.status_code in (200, 201):
+                offset += length
+                if on_progress:
+                    on_progress(
+                        UploadProgress(
+                            bytes_uploaded=offset, total_bytes=offset, percentage=100.0
+                        )
+                    )
+                resource: dict[str, Any] = response.json()
+                return resource
+
+            if response.status_code != 308:
+                raise self.map_error(response)
+
+            # Trust the server's committed range over our own bookkeeping.
+            committed = response.headers.get("range")
+            offset = int(committed.split("-")[-1]) + 1 if committed else offset + length
+            if on_progress:
+                on_progress(UploadProgress(bytes_uploaded=offset))
+            return None
+
+        async for chunk in source:
+            position = 0
+            while position < len(chunk):
+                take = min(aligned - filled, len(chunk) - position)
+                buffers[current][filled : filled + take] = chunk[position : position + take]
+                filled += take
+                position += take
+
+                if filled == aligned:
+                    # A full buffer cannot be final while more data may follow,
+                    # so release the previously held one and hold this instead.
+                    if held is not None:
+                        await send(held, aligned, None)
+                    held = current
+                    current = 1 - current
+                    filled = 0
+
+        # The stream is exhausted, so whatever remains is genuinely final.
+        if held is not None and filled == 0:
+            result = await send(held, aligned, offset + aligned)
+        elif held is not None:
+            await send(held, aligned, None)
+            result = await send(current, filled, offset + filled)
+        else:
+            result = await send(current, filled, filled)
+
+        if result is None:
+            raise ProviderUnavailableError(
+                "Google Drive accepted every chunk but never returned the file resource.",
+                provider="google-drive",
+            )
+        return result
 
     async def stream_download(self, file_id: str) -> AsyncIterator[bytes]:
         """Stream a file's content without buffering it whole."""

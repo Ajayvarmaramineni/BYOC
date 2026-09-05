@@ -154,8 +154,23 @@ export class GoogleDriveProvider implements BYOCProvider {
     const isLarge = byteLength !== undefined && byteLength >= 5 * 1024 * 1024; // 5 MB threshold
     const shouldUseResumable = options?.resumable || options?.onProgress || isLarge;
 
+    // A stream has no length to compare against a threshold, and chunked
+    // transfer is the only way to send one, so it always goes resumable.
+    const isStream =
+      byteLength === undefined &&
+      typeof data !== "string" &&
+      typeof (data as AsyncIterable<Uint8Array>)?.[Symbol.asyncIterator] === "function";
+
     let resource;
-    if (shouldUseResumable) {
+    if (isStream) {
+      resource = await this.uploader.uploadStream(
+        metadata,
+        data as AsyncIterable<Uint8Array>,
+        options?.mimeType ?? "application/octet-stream",
+        options?.chunkSize,
+        options?.onProgress
+      );
+    } else if (shouldUseResumable) {
       resource = await this.uploader.upload(metadata, data, {
         mimeType: options?.mimeType,
         chunkSize: options?.chunkSize,

@@ -125,14 +125,16 @@ class GoogleDriveProvider:
         if not normalized:
             raise InvalidInputError("Upload requires a file path.", provider=PROVIDER_ID)
 
+        payload: bytes | None
         if isinstance(data, str):
             payload = data.encode("utf-8")
         elif isinstance(data, bytes | bytearray | memoryview):
             payload = bytes(data)
         else:
-            raise InvalidInputError(
-                "Google Drive upload requires bytes or str.", provider=PROVIDER_ID
-            )
+            # An async iterator streams into the resumable session, so the
+            # object never has to fit in memory.
+            payload = None
+            stream = data
 
         mime = (options.mime_type if options else None) or "application/octet-stream"
         parent_id = await self.resolver.resolve_parent_folder_id(normalized, create=True)
@@ -147,19 +149,31 @@ class GoogleDriveProvider:
 
         resumable = options.resumable if options and options.resumable is not None else None
         wants_resumable = (
-            resumable
+            # A stream has no length to compare, and chunked transfer is the
+            # only way to send one, so it is always resumable.
+            True
+            if payload is None
+            else resumable
             if resumable is not None
             else (len(payload) > RESUMABLE_THRESHOLD or bool(options and options.on_progress))
         )
 
-        if wants_resumable:
+        chunk_size = options.chunk_size if options and options.chunk_size else 8 * 1024 * 1024
+
+        if payload is None:
+            upload_url = await self.http.start_resumable_upload(metadata, mime)
+            resource = await self.http.stream_chunks(
+                upload_url,
+                stream,
+                chunk_size=chunk_size,
+                on_progress=options.on_progress if options else None,
+            )
+        elif wants_resumable:
             upload_url = await self.http.start_resumable_upload(metadata, mime)
             resource = await self.http.upload_chunks(
                 upload_url,
                 payload,
-                chunk_size=(
-                    options.chunk_size if options and options.chunk_size else 8 * 1024 * 1024
-                ),
+                chunk_size=chunk_size,
                 on_progress=options.on_progress if options else None,
             )
         else:
