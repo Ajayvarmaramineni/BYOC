@@ -232,14 +232,22 @@ def test_encrypted_file_storage_roundtrip(tmp_path: Path) -> None:
     target = tmp_path / "session.enc"
     storage = EncryptedFileTokenStorage(target, "a-strong-encryption-key")
 
-    storage.set(TokenSession(access_token="at", refresh_token="rt", expires_at=123.0))
+    # Long and distinctive on purpose. A short needle like "rt" appears in
+    # random ciphertext by chance often enough to fail this assertion for real:
+    # two given bytes collide roughly once per 65536 positions, which over a
+    # ~150 byte envelope is a fraction of a percent per run -- and that fires
+    # regularly across four Python versions on every push. The test was
+    # genuinely flaky, not the encryption.
+    refresh = "refresh-token-9f3c1a7e-must-not-appear-in-ciphertext"
+    storage.set(TokenSession(access_token="at", refresh_token=refresh, expires_at=123.0))
     loaded = storage.get()
 
     assert loaded is not None
-    assert loaded.refresh_token == "rt"
+    assert loaded.refresh_token == refresh
     # The refresh token must not be readable on disk.
-    assert b"rt" not in target.read_bytes()
-    assert target.read_bytes()[:12] == b"BYOC_E2EE_V3"
+    on_disk = target.read_bytes()
+    assert refresh.encode() not in on_disk
+    assert on_disk[:12] == b"BYOC_E2EE_V3"
 
 
 def test_encrypted_file_storage_is_owner_only(tmp_path: Path) -> None:
