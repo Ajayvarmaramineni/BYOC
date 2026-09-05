@@ -12,6 +12,8 @@ export interface SignRequestParams {
   url: string;
   headers?: Record<string, string>;
   body?: Uint8Array | string;
+  /** Precomputed payload hash, including the SigV4 `UNSIGNED-PAYLOAD` sentinel. */
+  payloadHash?: string;
   datetime?: Date;
 }
 
@@ -80,9 +82,11 @@ export function signS3Request(
   const canonicalUri = parsedUrl.pathname || "/";
   const canonicalQuery = buildCanonicalQueryString(parsedUrl);
 
-  const bodyHash = params.body
-    ? sha256Hex(params.body)
-    : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+  const bodyHash = params.payloadHash ?? (
+    params.body !== undefined
+      ? sha256Hex(params.body)
+      : "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  );
 
   // Normalize all incoming headers to lowercase keys and trimmed values
   const normalizedHeaders: Record<string, string> = {

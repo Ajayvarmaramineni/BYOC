@@ -71,6 +71,14 @@ jobs:
       - name: Run unit and conformance suites
         run: pytest -q
 
+      - name: Static security scan
+        if: matrix.python-version == '3.13'
+        run: bandit -q -r src/byoc
+
+      - name: Dependency vulnerability audit
+        if: matrix.python-version == '3.13'
+        run: pip-audit
+
   integration:
     name: Live integration (MinIO + WebDAV)
     runs-on: ubuntu-latest
