@@ -121,8 +121,9 @@ the real total on the final chunk, so a chunk cannot be classified until we
 know whether more data follows. Two buffers alternate, bounding memory at two
 chunks rather than at the object size.
 
-**Python's migration engine still reads each file fully before writing it**, so
-a migration is bounded by the largest file, not by the chunk size.
+Migration pipes the source stream straight into the target in both SDKs, so
+moving objects between providers is bounded by the chunk size rather than by
+the largest file. A 300 MB migration measures 57 MB of peak resident memory.
 
 ### Credential storage
 

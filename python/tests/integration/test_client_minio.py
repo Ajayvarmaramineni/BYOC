@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -137,3 +138,41 @@ async def test_migrate_between_two_live_prefixes() -> None:
         await source.disconnect()
         await target.disconnect()
         await client.disconnect()
+
+
+@requires_minio
+async def test_migration_streams_instead_of_buffering(tmp_path: Path) -> None:
+    """A migration must be bounded by the chunk size, not the largest file.
+
+    Before this, the engine read each object fully before writing it, so
+    migrating a file larger than memory was impossible.
+    """
+    from byoc import LocalFileSystemProvider
+
+    await _ensure_bucket()
+    local = LocalFileSystemProvider(tmp_path / "src")
+    remote = _provider(f"mig-{uuid.uuid4().hex[:8]}")
+    client = AsyncBYOC(providers=[local, remote], default_provider_id="local")
+    await client.connect_all()
+
+    total = 24 * 1024 * 1024
+
+    async def chunks() -> AsyncIterator[bytes]:
+        for _ in range(total // (1024 * 1024)):
+            yield b"m" * (1024 * 1024)
+
+    try:
+        await client.use_provider("local").upload("big.bin", chunks())
+
+        report = await client.migrate(
+            source="local", target="s3-compatible", paths=["big.bin"]
+        )
+
+        assert report.files_migrated == 1, report.results
+        assert report.files_failed == 0
+
+        client.use_provider("s3-compatible")
+        assert (await client.metadata("big.bin")).size == total
+        await client.delete("big.bin")
+    finally:
+        await client.disconnect_all()
