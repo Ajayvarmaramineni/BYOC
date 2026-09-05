@@ -49,6 +49,6 @@
   },
   "sideEffects": false,
   "dependencies": {
-    "@types/node": ">=20"
+    "@types/node": ">=26"
   }
 }
