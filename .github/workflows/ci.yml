@@ -77,7 +77,10 @@ jobs:
 
       - name: Dependency vulnerability audit
         if: matrix.python-version == '3.13'
-        run: pip-audit
+        # --skip-editable: the project itself is installed with `pip install -e`,
+        # and pip-audit fails outright when it cannot find that version on PyPI.
+        # An unreleased version is the normal state on a feature branch.
+        run: pip-audit --skip-editable
 
   integration:
     name: Live integration (MinIO + WebDAV)

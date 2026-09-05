@@ -76,7 +76,7 @@ export class MemoryProvider implements BYOCProvider {
       category: "self-hosted",
       authentication: "local",
       supportsUserOwnedStorage: false,
-      adapterVersion: "0.3.0"
+      adapterVersion: "0.4.0"
     };
   }
 

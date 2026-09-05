@@ -75,7 +75,7 @@ from .types import (
     UploadProgress,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "E2EE_MAGIC_HEADER_V3",

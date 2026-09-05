@@ -92,7 +92,7 @@ class GoogleDriveProvider:
             category="personal-cloud",
             authentication="oauth2",
             supports_user_owned_storage=True,
-            adapter_version="0.3.0",
+            adapter_version="0.4.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:

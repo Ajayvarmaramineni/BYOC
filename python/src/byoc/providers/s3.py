@@ -7,6 +7,7 @@ to this module -- BYOC core never sees them.
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import AsyncIterator, Mapping
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -125,7 +126,7 @@ class S3CompatibleProvider:
             category="developer-cloud",
             authentication="access-key",
             supports_user_owned_storage=False,
-            adapter_version="0.3.0",
+            adapter_version="0.4.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:
@@ -434,12 +435,13 @@ class S3CompatibleProvider:
     async def _abort_multipart_upload(self, key: str, upload_id: str) -> None:
         """Discard a failed upload so its parts stop accruing storage charges."""
         url = f"{self.object_url(key)}?uploadId={quote(upload_id, safe='')}"
-        try:
+        # Best effort: the upload has already failed, and that failure is what
+        # the caller needs to see. Raising from the cleanup would replace a
+        # useful error with a confusing one. `suppress` states that intent,
+        # where a bare `except: pass` reads like an oversight.
+        with contextlib.suppress(Exception):
             signed = self._sign("DELETE", url)
             await self._http().request("DELETE", url, headers=signed)
-        except Exception:
-            # The original failure is what the caller needs to see, not this.
-            pass
 
     async def _upload_stream(
         self,

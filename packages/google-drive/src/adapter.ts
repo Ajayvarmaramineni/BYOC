@@ -74,7 +74,7 @@ export class GoogleDriveProvider implements BYOCProvider {
       category: "personal-cloud",
       authentication: "oauth2",
       supportsUserOwnedStorage: true,
-      adapterVersion: "0.3.0"
+      adapterVersion: "0.4.0"
     };
   }
 

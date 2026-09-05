@@ -50,7 +50,7 @@ export class WebDAVProvider implements BYOCProvider {
       category: "self-hosted",
       authentication: this.config.token ? "oauth2" : "basic",
       supportsUserOwnedStorage: true,
-      adapterVersion: "0.3.0"
+      adapterVersion: "0.4.0"
     };
   }
 

@@ -82,7 +82,7 @@ class MemoryProvider:
             category="self-hosted",
             authentication="local",
             supports_user_owned_storage=False,
-            adapter_version="0.3.0",
+            adapter_version="0.4.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:

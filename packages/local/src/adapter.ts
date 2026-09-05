@@ -67,7 +67,7 @@ export class LocalFileSystemProvider implements BYOCProvider {
       category: "self-hosted",
       authentication: "local",
       supportsUserOwnedStorage: true,
-      adapterVersion: "0.3.0"
+      adapterVersion: "0.4.0"
     };
   }
 

@@ -183,7 +183,7 @@ async def test_presigned_url_is_accepted_by_the_server(provider: S3CompatiblePro
     assert response.content == b"PDF BYTES"
 
 
-@pytest.mark.integration
+@requires_minio
 async def test_streams_an_unknown_length_body_as_multipart(
     provider: S3CompatibleProvider,
 ) -> None:
@@ -215,7 +215,7 @@ async def test_streams_an_unknown_length_body_as_multipart(
     await provider.delete("streamed/multipart.bin")
 
 
-@pytest.mark.integration
+@requires_minio
 async def test_streams_an_empty_body(provider: S3CompatibleProvider) -> None:
     """S3 rejects a zero-part multipart upload, so an empty stream still needs one."""
 
@@ -231,7 +231,7 @@ async def test_streams_an_empty_body(provider: S3CompatibleProvider) -> None:
     await provider.delete("streamed/empty.bin")
 
 
-@pytest.mark.integration
+@requires_minio
 async def test_a_streamed_upload_reports_progress(
     provider: S3CompatibleProvider,
 ) -> None:

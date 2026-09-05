@@ -1,6 +1,6 @@
 {
   "name": "byoc-monorepo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "BYOC (Bring Your Own Cloud) \u2014 Universal Storage Abstraction Layer",
   "license": "Apache-2.0",
