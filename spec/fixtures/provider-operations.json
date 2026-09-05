@@ -22,6 +22,7 @@
       "copy",
       "get_quota",
       "signed_url",
+      "create_upload_grant",
       "walk",
       "delete_tree",
       "delete_many",
@@ -49,7 +50,7 @@
       "manifest",
       "capabilities"
     ],
-    "optional": ["create_folder", "move", "copy", "quota", "signed_url"]
+    "optional": ["create_folder", "move", "copy", "quota", "signed_url", "create_upload_grant"]
   },
 
   "capability_contracts": {
@@ -69,6 +70,11 @@
         "requires_operation": "quota"
       },
       {
+        "capability": "direct_upload",
+        "requires_operation": "create_upload_grant",
+        "$comment": "Declaring direct_upload promises a browser can be handed a URL and upload to it without the application's credentials. See upload-grant.json for the wire format."
+      },
+      {
         "capability": "public_urls",
         "requires_operation": "signed_url",
         "$comment": "Only S3-compatible backends can hand a browser a URL that works without the caller's credentials. Drive and WebDAV report false rather than returning a link that would 401."
@@ -79,31 +85,32 @@
   "providers": {
     "$comment": "The operation surface each shipped adapter is expected to have, in both SDKs. Adding an adapter means adding it here.",
     "google-drive": {
-      "operations": ["create_folder", "move", "copy", "quota"],
-      "capabilities": { "folders": true, "quota": true, "server_side_copy": true, "public_urls": false }
+      "operations": ["create_folder", "move", "copy", "quota", "create_upload_grant"],
+      "capabilities": { "folders": true, "quota": true, "server_side_copy": true, "public_urls": false, "direct_upload": true }
     },
     "s3-compatible": {
-      "operations": ["move", "copy", "signed_url"],
+      "operations": ["move", "copy", "signed_url", "create_upload_grant"],
       "capabilities": {
         "folders": false,
         "quota": false,
         "server_side_copy": true,
-        "public_urls": true
+        "public_urls": true,
+        "direct_upload": true
       },
       "$comment": "S3 has no native folders and reports no account quota. Both stay false rather than being faked."
     },
     "webdav": {
       "operations": ["create_folder", "move", "copy", "quota"],
-      "capabilities": { "folders": true, "quota": true, "server_side_copy": true, "public_urls": false }
+      "capabilities": { "folders": true, "quota": true, "server_side_copy": true, "public_urls": false, "direct_upload": false }
     },
     "local": {
       "operations": ["create_folder", "move", "copy", "quota"],
-      "capabilities": { "folders": true, "quota": true, "server_side_copy": true, "public_urls": false },
+      "capabilities": { "folders": true, "quota": true, "server_side_copy": true, "public_urls": false, "direct_upload": false },
       "$comment": "Quota reports the backing filesystem's usage, not the root directory's."
     },
     "memory": {
       "operations": ["move", "copy", "quota"],
-      "capabilities": { "folders": false, "quota": true, "server_side_copy": true, "public_urls": false },
+      "capabilities": { "folders": false, "quota": true, "server_side_copy": true, "public_urls": false, "direct_upload": false },
       "$comment": "Models a flat key-value object store, the shape S3 and R2 have, so it has no real folders either."
     }
   }

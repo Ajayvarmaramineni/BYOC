@@ -1,6 +1,6 @@
 {
   "name": "example-node-quickstart",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Quickstart example consuming @byoc/core and @byoc/google-drive",
   "main": "index.ts",
@@ -9,11 +9,11 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@byoc/core": "0.3.0",
-    "@byoc/google-drive": "0.3.0",
-    "@byoc/local": "0.3.0",
-    "@byoc/memory": "0.3.0",
-    "@byoc/s3-compatible": "0.3.0",
-    "@byoc/webdav": "0.3.0"
+    "@byoc/core": "^0.4.0",
+    "@byoc/google-drive": "^0.4.0",
+    "@byoc/local": "^0.4.0",
+    "@byoc/memory": "^0.4.0",
+    "@byoc/s3-compatible": "^0.4.0",
+    "@byoc/webdav": "^0.4.0"
   }
 }

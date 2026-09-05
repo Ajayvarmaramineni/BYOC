@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Readable } from "node:stream";
 import { WebDAVProvider } from "../src/adapter.js";
 import { BYOCErrorCode, StorageError } from "@byoc/core";
 
@@ -64,6 +65,28 @@ describe("WebDAVProvider", () => {
         headers: expect.objectContaining({
           Authorization: expect.stringContaining("Basic ")
         })
+      })
+    );
+  });
+
+  it("sends a declared content length for streaming PUTs", async () => {
+    const provider = new WebDAVProvider({ ...validConfig, rootFolder: "" });
+    (global.fetch as any).mockResolvedValueOnce({ ok: true, status: 207, text: async () => "" });
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      headers: new Headers({ etag: '"stream-etag"' })
+    });
+
+    await provider.upload("stream.bin", Readable.from([Buffer.from("chunk")]), {
+      contentLength: 5
+    });
+
+    expect(global.fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining("stream.bin"),
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({ "Content-Length": "5" })
       })
     );
   });

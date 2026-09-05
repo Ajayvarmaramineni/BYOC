@@ -67,7 +67,7 @@ export class LocalFileSystemProvider implements BYOCProvider {
       category: "self-hosted",
       authentication: "local",
       supportsUserOwnedStorage: true,
-      adapterVersion: "0.3.0"
+      adapterVersion: "0.4.0"
     };
   }
 
@@ -81,7 +81,9 @@ export class LocalFileSystemProvider implements BYOCProvider {
       resumableUploads: false,
       versioning: false,
       quota: true,
-      serverSideCopy: true
+      serverSideCopy: true,
+      // A local path is not reachable by a browser.
+      directUpload: false
     };
   }
 

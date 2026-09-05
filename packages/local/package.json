@@ -1,6 +1,6 @@
 {
   "name": "@byoc/local",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local filesystem storage adapter for BYOC. No account, no network, no credentials.",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@byoc/core": "^0.3.0",
+    "@byoc/core": "^0.4.0",
     "@types/node": ">=20"
   },
   "keywords": [

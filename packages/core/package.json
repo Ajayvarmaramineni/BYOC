@@ -1,6 +1,6 @@
 {
   "name": "@byoc/core",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Core universal storage abstraction for BYOC (Bring Your Own Cloud)",
   "type": "module",
   "main": "./dist/index.js",

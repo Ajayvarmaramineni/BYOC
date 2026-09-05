@@ -9,7 +9,7 @@ as ``failed`` would make a caller re-upload bytes that are already there.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -151,11 +151,33 @@ async def migrate(
                     )
 
                 output = await source.download(path)
-                payload = await output.read()
-                size = output.metadata.size if output.metadata.size is not None else len(payload)
 
-                await target.upload(
-                    path, payload, UploadOptions(mime_type=output.metadata.mime_type)
+                # Pipe the source stream straight into the target rather than
+                # reading the whole object first. Every adapter now accepts an
+                # async iterator, so a migration is bounded by the chunk size
+                # instead of by the largest file being moved.
+                transferred = 0
+
+                source_chunks = output.stream()
+
+                async def piped() -> AsyncIterator[bytes]:
+                    nonlocal transferred
+                    async for chunk in source_chunks:
+                        transferred += len(chunk)
+                        yield chunk
+
+                written = await target.upload(
+                    path, piped(), UploadOptions(mime_type=output.metadata.mime_type)
+                )
+
+                # Prefer what the source declared; fall back to what actually
+                # moved, since a streamed upload knows its size only afterwards.
+                size = (
+                    output.metadata.size
+                    if output.metadata.size is not None
+                    else written.size
+                    if written.size is not None
+                    else transferred
                 )
 
                 # The bytes are on the target now. Anything that fails past this

@@ -52,7 +52,17 @@ class MemoryProvider:
     async def upload(
         self, path: str, data: StorageInput, options: UploadOptions | None = None
     ) -> StorageObject:
-        payload = data.encode("utf-8") if isinstance(data, str) else bytes(data)  # type: ignore[arg-type]
+        # Mirror a real adapter: StorageInput includes async iterators, and
+        # every shipped provider now consumes them.
+        if isinstance(data, str):
+            payload = data.encode("utf-8")
+        elif isinstance(data, bytes | bytearray | memoryview):
+            payload = bytes(data)
+        else:
+            collected = bytearray()
+            async for chunk in data:
+                collected.extend(chunk)
+            payload = bytes(collected)
         mime = options.mime_type if options else None
         self.store[path] = (payload, mime)
         return StorageObject(
@@ -356,3 +366,51 @@ async def test_migrate_with_no_paths_returns_an_empty_report() -> None:
     report = await storage.migrate(source="a", target="b", paths=[])
     assert report.files_total == 0
     assert report.results == []
+
+
+async def test_migration_pipes_the_stream_and_never_buffers_the_object() -> None:
+    """Migration must consume ``stream()``, not ``read()``.
+
+    Buffering is not incorrect, only wasteful, so a round-trip assertion
+    cannot catch a regression here -- the bytes still arrive. What
+    distinguishes the two is which accessor gets used, so that is what this
+    pins. Without it, a change back to ``await output.read()`` would pass
+    every other test while making migration impossible for a file larger
+    than memory.
+    """
+    source = MemoryProvider("source")
+    target = MemoryProvider("target")
+    await source.upload("big.bin", b"x" * 4096)
+
+    read_calls = 0
+    stream_calls = 0
+    original_download = source.download
+
+    async def counting_download(path: str) -> StorageOutput:
+        nonlocal read_calls, stream_calls
+        output = await original_download(path)
+
+        async def counted_stream() -> AsyncIterator[bytes]:
+            nonlocal stream_calls
+            stream_calls += 1
+            async for chunk in output.stream():
+                yield chunk
+
+        async def counted_read() -> bytes:
+            nonlocal read_calls
+            read_calls += 1
+            return await output.read()
+
+        return StorageOutput(
+            metadata=output.metadata, stream=counted_stream, read=counted_read
+        )
+
+    source.download = counting_download  # type: ignore[method-assign]
+
+    client = AsyncBYOC(providers=[source, target], default_provider_id="source")
+    report = await client.migrate(source="source", target="target", paths=["big.bin"])
+
+    assert report.files_migrated == 1, report.results
+    assert stream_calls == 1, "migration should consume the source stream"
+    assert read_calls == 0, "migration must not buffer the whole object"
+    assert target.store["big.bin"][0] == b"x" * 4096

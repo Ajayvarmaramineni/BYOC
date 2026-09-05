@@ -44,11 +44,13 @@ export class WebDAVHttpClient {
     path: string,
     data: StorageInput,
     mimeType?: string,
-    onProgress?: (progress: UploadProgress) => void
+    onProgress?: (progress: UploadProgress) => void,
+    contentLength?: number
   ): Promise<StorageObject> {
     const url = this.getFullUrl(path);
     let bodyPayload: any;
     let payloadSize: number | undefined;
+    let isStreaming = false;
 
     if (typeof data === "string") {
       const bytes = new TextEncoder().encode(data);
@@ -68,15 +70,39 @@ export class WebDAVHttpClient {
       payloadSize = data.size;
     } else if (
       (typeof ReadableStream !== "undefined" && data instanceof ReadableStream) ||
-      (typeof Readable !== "undefined" && data instanceof Readable)
+      (typeof Readable !== "undefined" && data instanceof Readable) ||
+      // A bare async generator is neither of the above but is the most natural
+      // way to write a producer in TypeScript, and StorageInput accepts it.
+      typeof (data as AsyncIterable<Uint8Array>)?.[Symbol.asyncIterator] === "function"
     ) {
       bodyPayload = data;
+      isStreaming = true;
     } else {
       throw new StorageError({
         code: BYOCErrorCode.INVALID_INPUT,
         message: "Unsupported data payload type for WebDAV upload.",
         provider: "webdav"
       });
+    }
+
+    if (contentLength !== undefined) {
+      if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+        throw new StorageError({
+          code: BYOCErrorCode.INVALID_INPUT,
+          message: `WebDAV upload contentLength must be a non-negative safe integer (received ${contentLength}).`,
+          provider: "webdav",
+          retryable: false
+        });
+      }
+      if (payloadSize !== undefined && payloadSize !== contentLength) {
+        throw new StorageError({
+          code: BYOCErrorCode.INVALID_INPUT,
+          message: `WebDAV upload contentLength ${contentLength} does not match the ${payloadSize}-byte input.`,
+          provider: "webdav",
+          retryable: false
+        });
+      }
+      payloadSize = contentLength;
     }
 
     const headers: Record<string, string> = {
@@ -89,6 +115,24 @@ export class WebDAVHttpClient {
 
     const auth = this.getAuthHeader();
     if (auth) headers["Authorization"] = auth;
+
+    // A stream of unknown length still has to report an accurate size, so the
+    // bytes are counted as they pass through rather than guessed at.
+    let streamedBytes = 0;
+    if (isStreaming && payloadSize === undefined) {
+      const source = bodyPayload as AsyncIterable<Uint8Array>;
+      bodyPayload = (async function* () {
+        for await (const chunk of source) {
+          streamedBytes += chunk.byteLength;
+          onProgress?.({
+            bytesUploaded: streamedBytes,
+            totalBytes: undefined,
+            percentage: undefined
+          });
+          yield chunk;
+        }
+      })();
+    }
 
     return withRetry(async () => {
       const response = await fetch(url, {
@@ -119,11 +163,15 @@ export class WebDAVHttpClient {
         name: path.split("/").pop() || path,
         provider: "webdav",
         providerId: path,
-        size: payloadSize,
+        size: payloadSize ?? streamedBytes,
         mimeType: mimeType || "application/octet-stream",
         checksum: etag,
         updatedAt: new Date()
       };
+    }, {
+      // WebDAV PUT has no portable offset-resume handshake. A consumed stream
+      // cannot be retried safely, while buffered bodies remain replayable.
+      maxRetries: isStreaming ? 0 : 3
     });
   }
 

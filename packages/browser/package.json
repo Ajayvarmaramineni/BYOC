@@ -1,0 +1,53 @@
+{
+  "name": "@byoc/browser",
+  "version": "0.4.0",
+  "description": "Upload straight from the browser to the user's own cloud. The bytes never touch your server.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@byoc/core": "^0.4.0"
+  },
+  "keywords": [
+    "byoc",
+    "storage",
+    "browser",
+    "direct-upload",
+    "presigned",
+    "s3",
+    "google-drive",
+    "client-side"
+  ],
+  "author": "Ajay Ramineni",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ajayvarmaramineni/BYOC.git",
+    "directory": "packages/browser"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/Ajayvarmaramineni/BYOC/tree/main/packages/browser#readme",
+  "bugs": {
+    "url": "https://github.com/Ajayvarmaramineni/BYOC/issues"
+  },
+  "sideEffects": false
+}

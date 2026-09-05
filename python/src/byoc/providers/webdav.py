@@ -14,10 +14,16 @@ import contextlib
 from collections.abc import AsyncIterator
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
-from xml.etree import ElementTree
 
 import httpx
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import ParseError, fromstring
+
+if TYPE_CHECKING:
+    # Runtime parsing always uses defusedxml; this import is only a type annotation.
+    from xml.etree.ElementTree import Element  # nosec B405
 
 from ..errors import (
     ConflictError,
@@ -38,6 +44,7 @@ from ..types import (
     StorageOutput,
     StorageQuota,
     UploadOptions,
+    UploadProgress,
 )
 
 PROVIDER_ID = "webdav"
@@ -63,7 +70,7 @@ _QUOTA_BODY = """<?xml version="1.0" encoding="utf-8"?>
 </d:propfind>"""
 
 
-def _prop(response_el: ElementTree.Element, tag: str) -> str | None:
+def _prop(response_el: Element, tag: str) -> str | None:
     """Read a DAV property from a multistatus <response> element."""
     for propstat in response_el.findall(f"{_DAV}propstat"):
         status = propstat.findtext(f"{_DAV}status") or ""
@@ -75,12 +82,23 @@ def _prop(response_el: ElementTree.Element, tag: str) -> str | None:
     return None
 
 
-def _is_collection(response_el: ElementTree.Element) -> bool:
+def _is_collection(response_el: Element) -> bool:
     for propstat in response_el.findall(f"{_DAV}propstat"):
         resource_type = propstat.find(f"{_DAV}prop/{_DAV}resourcetype")
         if resource_type is not None and resource_type.find(f"{_DAV}collection") is not None:
             return True
     return False
+
+
+def _parse_xml(payload: str) -> Element:
+    try:
+        return fromstring(payload)
+    except (DefusedXmlException, ParseError) as exc:
+        raise ProviderUnavailableError(
+            "WebDAV returned malformed or unsafe XML.",
+            provider=PROVIDER_ID,
+            raw_error=exc,
+        ) from exc
 
 
 class WebDAVProvider:
@@ -131,7 +149,7 @@ class WebDAVProvider:
             category="self-hosted",
             authentication="oauth2" if self.token else "basic",
             supports_user_owned_storage=True,
-            adapter_version="0.3.0",
+            adapter_version="0.4.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:
@@ -145,6 +163,10 @@ class WebDAVProvider:
             versioning=False,
             quota=True,
             server_side_copy=True,
+            # WebDAV authenticates every request with Basic credentials, so
+            # there is no URL a browser can be handed without also handing it
+            # the password.
+            direct_upload=False,
         )
 
     async def connect(self) -> None:
@@ -265,9 +287,7 @@ class WebDAVProvider:
             updated_at=updated_at,
         )
 
-    def _object_from_propfind(
-        self, remote: str, entry: ElementTree.Element
-    ) -> StorageObject:
+    def _object_from_propfind(self, remote: str, entry: Element) -> StorageObject:
         """Build a StorageObject from one multistatus <response> element."""
         is_folder = _is_collection(entry)
         size = _prop(entry, "getcontentlength")
@@ -324,23 +344,45 @@ class WebDAVProvider:
         remote = self._to_remote(path)
         await self._ensure_parents(get_dirname(remote))
 
+        payload: bytes | None
         if isinstance(data, str):
             payload = data.encode("utf-8")
         elif isinstance(data, bytes | bytearray | memoryview):
             payload = bytes(data)
         else:
-            raise InvalidInputError(
-                "WebDAV upload requires bytes or str. Streaming uploads are not yet supported.",
-                provider=PROVIDER_ID,
-            )
+            # An async iterator is sent with chunked transfer encoding, so the
+            # payload never exists in memory as a whole.
+            payload = None
+            stream = data
 
         mime = (options.mime_type if options else None) or "application/octet-stream"
         url = self._url(remote)
 
+        sent = 0
+        on_progress = options.on_progress if options else None
+
+        async def counted(source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+            """Pass chunks through, tracking how many bytes actually went out."""
+            nonlocal sent
+            async for chunk in source:
+                sent += len(chunk)
+                if on_progress:
+                    on_progress(UploadProgress(bytes_uploaded=sent))
+                yield chunk
+
         async def send() -> StorageObject:
-            response = await self._http().put(
-                url, headers=self._headers({"content-type": mime}), content=payload
-            )
+            nonlocal sent
+            headers = self._headers({"content-type": mime})
+            if payload is not None:
+                response = await self._http().put(url, headers=headers, content=payload)
+                size = len(payload)
+            else:
+                sent = 0
+                response = await self._http().put(
+                    url, headers=headers, content=counted(stream)
+                )
+                size = sent
+
             if response.is_error:
                 raise self._map_error(response)
 
@@ -351,11 +393,14 @@ class WebDAVProvider:
                 provider=PROVIDER_ID,
                 provider_id=remote,
                 type="file",
-                size=len(payload),
+                size=size,
                 mime_type=mime,
                 checksum=(response.headers.get("etag") or "").strip('"') or None,
             )
 
+        # A stream can only be consumed once, so a retry would resend nothing.
+        if payload is None:
+            return await send()
         return await with_retry(send)
 
     async def download(self, path: str) -> StorageOutput:
@@ -414,7 +459,7 @@ class WebDAVProvider:
             if response.is_error:
                 raise self._map_error(response)
 
-            root = ElementTree.fromstring(response.text)
+            root = _parse_xml(response.text)
             entry = root.find(f"{_DAV}response")
             if entry is None:
                 raise ObjectNotFoundError(
@@ -449,7 +494,7 @@ class WebDAVProvider:
             return response
 
         response = await with_retry(fetch)
-        root = ElementTree.fromstring(response.text)
+        root = _parse_xml(response.text)
         results: list[StorageObject] = []
 
         for entry in root.findall(f"{_DAV}response"):
@@ -511,7 +556,7 @@ class WebDAVProvider:
         if response.is_error:
             raise self._map_error(response)
 
-        root = ElementTree.fromstring(response.text)
+        root = _parse_xml(response.text)
         entry = root.find(f"{_DAV}response")
         if entry is None:
             return StorageQuota(used=0)

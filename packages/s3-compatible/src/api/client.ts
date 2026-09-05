@@ -21,9 +21,37 @@ export interface S3ClientConfig extends SigV4Options {
   forcePathStyle?: boolean;
 }
 
+/**
+ * Bytes buffered per multipart part. S3's floor is 5 MiB for every part but
+ * the last, so this cannot go below that.
+ */
+export const MULTIPART_PART_SIZE = 8 * 1024 * 1024;
+
 export interface S3UploadPart {
   partNumber: number;
   etag: string;
+}
+
+/**
+ * Adapts a web ReadableStream to an async iterable.
+ *
+ * Node's streams are async-iterable already, but a web ReadableStream only
+ * gained that in newer runtimes, so this keeps the multipart path working on
+ * both without a runtime check at every call site.
+ */
+async function* streamToAsyncIterable(
+  stream: ReadableStream<Uint8Array>
+): AsyncGenerator<Uint8Array> {
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value) yield value;
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export class S3HttpClient {
@@ -71,11 +99,13 @@ export class S3HttpClient {
     data: StorageInput,
     mimeType?: string,
     metadata?: Record<string, string>,
-    onProgress?: (progress: UploadProgress) => void
+    onProgress?: (progress: UploadProgress) => void,
+    contentLength?: number
   ): Promise<StorageObject> {
     const url = this.getObjectUrl(key);
     let bodyPayload: any;
     let payloadSize: number | undefined;
+    let isStreaming = false;
 
     if (typeof data === "string") {
       const bytes = new TextEncoder().encode(data);
@@ -91,19 +121,73 @@ export class S3HttpClient {
       bodyPayload = new Uint8Array(data);
       payloadSize = data.byteLength;
     } else if (typeof Blob !== "undefined" && data instanceof Blob) {
-      bodyPayload = data;
-      payloadSize = data.size;
+      bodyPayload = new Uint8Array(await data.arrayBuffer());
+      payloadSize = bodyPayload.byteLength;
     } else if (
       (typeof ReadableStream !== "undefined" && data instanceof ReadableStream) ||
-      (typeof Readable !== "undefined" && data instanceof Readable)
+      (typeof Readable !== "undefined" && data instanceof Readable) ||
+      // A bare async generator is neither of the above but is the most natural
+      // way to write a producer in TypeScript, and StorageInput accepts it.
+      typeof (data as AsyncIterable<Uint8Array>)?.[Symbol.asyncIterator] === "function"
     ) {
       bodyPayload = data;
+      isStreaming = true;
     } else {
       throw new StorageError({
         code: BYOCErrorCode.INVALID_INPUT,
         message: "Unsupported data payload type for S3 upload.",
         provider: "s3-compatible"
       });
+    }
+
+    if (contentLength !== undefined) {
+      if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+        throw new StorageError({
+          code: BYOCErrorCode.INVALID_INPUT,
+          message: `S3 upload contentLength must be a non-negative safe integer (received ${contentLength}).`,
+          provider: "s3-compatible",
+          retryable: false
+        });
+      }
+      if (payloadSize !== undefined && payloadSize !== contentLength) {
+        throw new StorageError({
+          code: BYOCErrorCode.INVALID_INPUT,
+          message: `S3 upload contentLength ${contentLength} does not match the ${payloadSize}-byte input.`,
+          provider: "s3-compatible",
+          retryable: false
+        });
+      }
+      payloadSize = contentLength;
+    }
+    if (isStreaming && payloadSize === undefined) {
+      // A stream of unknown length goes up as a multipart upload: S3 answers
+      // 411 Length Required to a chunked PUT, and every multipart part carries
+      // its own Content-Length.
+      const iterable =
+        typeof (bodyPayload as ReadableStream).getReader === "function"
+          ? streamToAsyncIterable(bodyPayload as ReadableStream<Uint8Array>)
+          : (bodyPayload as AsyncIterable<Uint8Array>);
+
+      const result = await this.putObjectStreaming(
+        key,
+        iterable,
+        mimeType,
+        metadata,
+        onProgress
+      );
+
+      return {
+        id: `s3_${this.config.bucket}_${key}`,
+        path: key,
+        name: key.split("/").pop() || key,
+        provider: "s3-compatible",
+        providerId: key,
+        type: "file",
+        size: result.size,
+        mimeType: mimeType || "application/octet-stream",
+        checksum: result.etag,
+        updatedAt: new Date()
+      };
     }
 
     const headers: Record<string, string> = {
@@ -124,7 +208,8 @@ export class S3HttpClient {
       method: "PUT",
       url,
       headers,
-      body: typeof bodyPayload === "string" || bodyPayload instanceof Uint8Array ? bodyPayload : undefined
+      body: typeof bodyPayload === "string" || bodyPayload instanceof Uint8Array ? bodyPayload : undefined,
+      payloadHash: isStreaming ? "UNSIGNED-PAYLOAD" : undefined
     });
 
     return withRetry(async () => {
@@ -161,6 +246,10 @@ export class S3HttpClient {
         checksum: etag,
         updatedAt: new Date()
       };
+    }, {
+      // A stream is a one-shot body. Retrying it without a provider-native
+      // resumable session would silently resend only the unread suffix.
+      maxRetries: isStreaming ? 0 : 3
     });
   }
 
@@ -335,16 +424,95 @@ export class S3HttpClient {
   /**
    * S3 Multipart Upload: Initiate
    */
-  public async createMultipartUpload(key: string, mimeType?: string): Promise<string> {
+  /**
+   * Streams a body of unknown length to S3 as a multipart upload.
+   *
+   * S3 answers 411 Length Required to a chunked PUT, so a stream whose size is
+   * not known up front cannot go in one request. Multipart is the way round it:
+   * every part carries its own Content-Length, and only one part is ever held
+   * in memory.
+   *
+   * The part buffer is allocated once and refilled, because a fresh allocation
+   * per part makes peak memory climb with file size even though only one part
+   * is live. Reuse is safe: each part is fully awaited before the buffer is
+   * written again.
+   */
+  public async putObjectStreaming(
+    key: string,
+    source: AsyncIterable<Uint8Array>,
+    mimeType?: string,
+    metadata?: Record<string, string>,
+    onProgress?: (progress: UploadProgress) => void
+  ): Promise<{ size: number; etag?: string }> {
+    const uploadId = await this.createMultipartUpload(key, mimeType, metadata);
+    const parts: S3UploadPart[] = [];
+    const buffer = new Uint8Array(MULTIPART_PART_SIZE);
+
+    let filled = 0;
+    let total = 0;
+    let partNumber = 1;
+
+    const flush = async (length: number): Promise<void> => {
+      parts.push(await this.uploadPart(key, uploadId, partNumber, buffer.subarray(0, length)));
+      partNumber += 1;
+      total += length;
+      onProgress?.({ bytesUploaded: total, totalBytes: undefined, percentage: undefined });
+    };
+
+    try {
+      for await (const chunk of source) {
+        const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
+        let offset = 0;
+        while (offset < bytes.byteLength) {
+          const take = Math.min(MULTIPART_PART_SIZE - filled, bytes.byteLength - offset);
+          buffer.set(bytes.subarray(offset, offset + take), filled);
+          filled += take;
+          offset += take;
+
+          if (filled === MULTIPART_PART_SIZE) {
+            await flush(filled);
+            filled = 0;
+          }
+        }
+      }
+
+      // The final part may be short. An empty stream still needs one part:
+      // S3 rejects a zero-part upload.
+      if (filled > 0 || parts.length === 0) {
+        await flush(filled);
+      }
+
+      const completed = await this.completeMultipartUpload(key, uploadId, parts);
+      return { size: total, etag: completed.checksum };
+    } catch (error) {
+      // Discard the pending parts so they stop accruing storage charges. The
+      // original failure is what the caller needs, not an abort failure.
+      await this.abortMultipartUpload(key, uploadId).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  public async createMultipartUpload(
+    key: string,
+    mimeType?: string,
+    metadata?: Record<string, string>
+  ): Promise<string> {
     const url = new URL(this.getObjectUrl(key));
     url.searchParams.set("uploads", "");
+
+    // User metadata is only accepted when the upload is created, not on the
+    // individual parts, so it has to be attached here or it is lost.
+    const headers: Record<string, string> = {
+      "content-type": mimeType || "application/octet-stream"
+    };
+    for (const [name, value] of Object.entries(metadata ?? {})) {
+      headers[`x-amz-meta-${name.toLowerCase()}`] = value;
+    }
 
     const signedHeaders = signS3Request(this.config, {
       method: "POST",
       url: url.toString(),
-      headers: {
-        "content-type": mimeType || "application/octet-stream"
-      }
+      headers
     });
 
     return withRetry(async () => {

@@ -50,7 +50,7 @@ export class WebDAVProvider implements BYOCProvider {
       category: "self-hosted",
       authentication: this.config.token ? "oauth2" : "basic",
       supportsUserOwnedStorage: true,
-      adapterVersion: "0.3.0"
+      adapterVersion: "0.4.0"
     };
   }
 
@@ -62,7 +62,9 @@ export class WebDAVProvider implements BYOCProvider {
       resumableUploads: false,
       versioning: false,
       quota: true,
-      serverSideCopy: true
+      serverSideCopy: true,
+      // WebDAV authenticates every request with Basic credentials, so there is no URL a browser can be handed without also handing it the password.
+      directUpload: false
     };
   }
 
@@ -100,7 +102,13 @@ export class WebDAVProvider implements BYOCProvider {
       await this.ensureFolderHierarchy(dirname);
     }
 
-    const result = await this.http.put(fullPath, data, options?.mimeType, options?.onProgress);
+    const result = await this.http.put(
+      fullPath,
+      data,
+      options?.mimeType,
+      options?.onProgress,
+      options?.contentLength
+    );
     return {
       ...result,
       path: normalizeVirtualPath(path)

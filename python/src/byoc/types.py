@@ -81,6 +81,7 @@ class UploadOptions:
     chunk_size: int | None = None
     on_progress: ProgressCallback | None = None
     metadata: Mapping[str, str] = field(default_factory=dict)
+    content_length: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +147,76 @@ class ProviderCapabilities:
     versioning: bool = False
     quota: bool = False
     server_side_copy: bool = False
+    direct_upload: bool = False
+    """Whether the provider can mint an :class:`UploadGrant`, letting a browser
+    upload straight to the user's cloud without bytes crossing this server."""
+
+
+@dataclass(frozen=True, slots=True)
+class UploadGrant:
+    """A capability to upload one object, safe to hand to an untrusted client.
+
+    The whole point of BYOC is that file bytes never pass through the
+    application server. A grant is what makes that literal: the server signs
+    or opens an upload, hands the browser this object, and the browser
+    transfers the bytes straight to the user's own cloud.
+
+    It is deliberately plain data -- JSON-serializable, no methods, none of the
+    application's own credentials -- so it can be returned from an API route
+    and consumed by ``@byoc/browser``.
+
+    Providers reach the same shape by different routes: S3 signs a PUT URL,
+    Google Drive opens a resumable session whose URI is itself the capability.
+    Neither requires the client to hold a long-lived secret.
+    """
+
+    provider: str
+    path: str
+    url: str
+    """Absolute URL the client uploads to. Treat as a secret: it IS the capability."""
+    method: str
+    headers: Mapping[str, str] = field(default_factory=dict)
+    protocol: str = "single"
+    """``single`` sends the whole body at once; ``resumable`` allows chunking."""
+    expires_at: datetime | None = None
+    chunk_size: int | None = None
+    max_bytes: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe form, for returning straight from an API route.
+
+        Absent optional fields are omitted rather than serialized as ``null``.
+        A JSON ``null`` means "not applicable" to a Python reader and is a
+        present-but-empty value to a JavaScript one, and that mismatch is a
+        real bug: a ``null`` max_bytes once made the browser client reject
+        every upload, because ``size > null`` is true in JavaScript.
+        """
+        payload: dict[str, Any] = {
+            "provider": self.provider,
+            "path": self.path,
+            "url": self.url,
+            "method": self.method,
+            "headers": dict(self.headers),
+            "protocol": self.protocol,
+        }
+        if self.expires_at is not None:
+            payload["expiresAt"] = self.expires_at.isoformat()
+        if self.chunk_size is not None:
+            payload["chunkSize"] = self.chunk_size
+        if self.max_bytes is not None:
+            payload["maxBytes"] = self.max_bytes
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
+class UploadGrantOptions:
+    """Options when minting an :class:`UploadGrant`."""
+
+    expires_in_seconds: int = 900
+    """Keep it short; the grant is a bearer capability."""
+    mime_type: str | None = None
+    size_bytes: int | None = None
+    """Total size. Some providers require it up front."""
 
 
 @dataclass(frozen=True, slots=True)

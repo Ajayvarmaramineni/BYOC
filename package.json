@@ -1,6 +1,6 @@
 {
   "name": "byoc-monorepo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "BYOC (Bring Your Own Cloud) \u2014 Universal Storage Abstraction Layer",
   "license": "Apache-2.0",
@@ -16,7 +16,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b packages/core packages/google-drive packages/s3-compatible packages/webdav packages/local packages/memory packages/provider-sdk examples/node-quickstart",
+    "benchmark:streaming": "node --expose-gc scripts/benchmark-streaming.mjs",
+    "typecheck": "tsc -b packages/core packages/google-drive packages/s3-compatible packages/webdav packages/local packages/memory packages/browser packages/provider-sdk examples/node-quickstart",
     "clean": "rm -rf node_modules packages/*/node_modules packages/*/dist examples/*/node_modules"
   },
   "devDependencies": {

@@ -8,6 +8,46 @@ version is below `1.0.0`, the public API may change between minor releases.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- `BYOC_E2EE_V3`: independently authenticated AES-256-GCM frames for
+  bounded-memory encryption and decryption in TypeScript and Python
+- `encryptStream()` / `decryptStream()` and Python
+  `encrypt_stream()` / `decrypt_stream()`
+- Exact V3 envelope sizing via `encryptedSize()` and Python `encrypted_size()`
+- A deterministic V3 cross-SDK fixture plus hostile chunk-boundary, truncation,
+  reorder, oversized-frame, empty-object, and header-tampering tests
+- A research-backed v0.4 product architecture in
+  [`docs/design/byoc-v0.4-strategy.md`](./docs/design/byoc-v0.4-strategy.md)
+- A repeatable bounded-memory benchmark via `npm run benchmark:streaming`
+- `UploadOptions.contentLength` for exact-length streaming requests; the encrypted
+  wrapper converts plaintext length to the V3 envelope length
+
+### Changed
+
+- TypeScript `EncryptedStorageWrapper` now streams true stream inputs, keeps
+  buffered inputs payload-signed and retryable, reports plaintext sizes, and
+  preserves the underlying provider's resumable capability
+- Pure cryptography interop tests no longer require a running S3 server
+
+### Fixed
+
+- Streamed S3 PUT requests now sign `UNSIGNED-PAYLOAD` instead of the SHA-256
+  of an empty body
+- S3 rejects unknown-length streams before sending a request that portable
+  S3-compatible servers such as MinIO refuse with HTTP 411
+- One-shot S3 and WebDAV request bodies are not retried after their streams have
+  already been consumed
+- Python S3 and WebDAV responses now use `defusedxml` for provider-controlled XML;
+  Bandit and `pip-audit` run in CI
+
+### Compatibility
+
+- New encryption writes use V3. Existing V1 and V2 objects remain readable in
+  both SDKs.
+
 ## [0.3.0] - 2026-08-27
 
 The release that makes BYOC runnable without an account, and closes a set of

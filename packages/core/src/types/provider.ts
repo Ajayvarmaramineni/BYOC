@@ -4,7 +4,9 @@ import type {
   StorageOutput,
   UploadOptions,
   BackupOptions,
-  StorageQuota
+  StorageQuota,
+  UploadGrant,
+  UploadGrantOptions
 } from "./storage.js";
 
 export type ProviderCategory = "personal-cloud" | "self-hosted" | "developer-cloud";
@@ -34,6 +36,11 @@ export interface ProviderCapabilities {
   readonly versioning: boolean;
   readonly quota: boolean;
   readonly serverSideCopy: boolean;
+  /**
+   * Whether the provider can mint an {@link UploadGrant}, letting a browser
+   * upload straight to the user's cloud without the bytes crossing this server.
+   */
+  readonly directUpload: boolean;
 }
 
 /**
@@ -99,5 +106,6 @@ export interface BYOCProvider {
   move?(source: string, destination: string): Promise<void>;
   copy?(source: string, destination: string): Promise<void>;
   quota?(): Promise<StorageQuota>;
+  createUploadGrant?(path: string, options?: UploadGrantOptions): Promise<UploadGrant>;
   backup?(payload: StorageInput, options?: BackupOptions): Promise<StorageObject>;
 }

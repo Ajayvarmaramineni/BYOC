@@ -12,7 +12,9 @@ import type {
   BackupOptions,
   BatchDeleteReport,
   BatchFailure,
-  SignedUrlOptions
+  SignedUrlOptions,
+  UploadGrant,
+  UploadGrantOptions
 } from "../types/storage.js";
 import { normalizeVirtualPath } from "../paths/resolver.js";
 import { BYOCErrorCode } from "../errors/codes.js";
@@ -515,6 +517,47 @@ export class BYOC {
       total: deleted.length + failed.length,
       allSucceeded: failed.length === 0
     };
+  }
+
+  /**
+   * Mints a capability the browser uses to upload straight to the user's cloud.
+   *
+   * This is the operation the whole project exists for: the bytes go from the
+   * user's machine to the user's own storage, and this server sees a path and
+   * a size but never any content. Return the grant from an API route and hand
+   * it to `uploadWithGrant` from `@byoc/browser`.
+   *
+   * The grant is a bearer capability. Anyone holding it can write to that one
+   * path until it expires, so keep the lifetime short and only issue one after
+   * checking the caller is allowed to write there.
+   */
+  public async createUploadGrant(
+    path: string,
+    options?: UploadGrantOptions
+  ): Promise<UploadGrant> {
+    const capabilities = await this.capabilities();
+    if (!capabilities.directUpload || !this.currentProvider.createUploadGrant) {
+      throw new StorageError({
+        code: BYOCErrorCode.CAPABILITY_UNSUPPORTED,
+        message:
+          `Provider '${this.manifest().name}' cannot issue upload grants, so a ` +
+          "browser cannot upload to it directly. Upload through this server instead.",
+        provider: this.manifest().id,
+        retryable: false
+      });
+    }
+
+    const normalized = normalizeVirtualPath(path);
+    if (!normalized) {
+      throw new StorageError({
+        code: BYOCErrorCode.INVALID_INPUT,
+        message: "Creating an upload grant requires a valid non-empty file path.",
+        provider: this.manifest().id,
+        retryable: false
+      });
+    }
+
+    return this.currentProvider.createUploadGrant(normalized, options);
   }
 
   /**

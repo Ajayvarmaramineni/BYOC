@@ -74,6 +74,10 @@ requires_interop = pytest.mark.skipif(
     not (_node_available() and _ts_built() and _s3_up()),
     reason="Interop needs node, a built TypeScript dist/, and a live S3 server",
 )
+requires_node = pytest.mark.skipif(
+    not (_node_available() and _ts_built()),
+    reason="Interop needs node and a built TypeScript dist/",
+)
 
 
 @pytest.fixture(scope="module")
@@ -256,7 +260,7 @@ async def test_webdav_python_writes_typescript_reads(dav_endpoint: str) -> None:
 # -- Encryption --------------------------------------------------------------
 
 
-@requires_interop
+@requires_node
 def test_e2ee_typescript_encrypts_python_decrypts() -> None:
     """Without this, an encrypted file written by one SDK is lost to the other."""
     passphrase = "cross-sdk-interop-passphrase"
@@ -267,12 +271,12 @@ def test_e2ee_typescript_encrypts_python_decrypts() -> None:
     ]
     envelope = bytes.fromhex(envelope_hex)
 
-    assert envelope[:12] == b"BYOC_E2EE_V2"
+    assert envelope[:12] == b"BYOC_E2EE_V3"
     decrypted = E2EECrypto(passphrase=passphrase).decrypt_sync(envelope)
     assert decrypted.decode("utf-8") == plaintext
 
 
-@requires_interop
+@requires_node
 def test_e2ee_python_encrypts_typescript_decrypts() -> None:
     passphrase = "cross-sdk-interop-passphrase"
     plaintext = "Sensitive payload written by Python."
@@ -282,7 +286,7 @@ def test_e2ee_python_encrypts_typescript_decrypts() -> None:
     assert result["plaintext"] == plaintext
 
 
-@requires_interop
+@requires_node
 @pytest.mark.parametrize("iterations", [10_000, 100_000, 600_000, 2_000_000])
 def test_e2ee_iteration_counts_interoperate(iterations: int) -> None:
     """The envelope carries its own work factor, so any valid count must cross."""
@@ -298,7 +302,7 @@ def test_e2ee_iteration_counts_interoperate(iterations: int) -> None:
     assert E2EECrypto(passphrase=passphrase).decrypt_sync(envelope).decode() == plaintext
 
 
-@requires_interop
+@requires_node
 def test_e2ee_wrong_passphrase_fails_the_same_way_across_sdks() -> None:
     envelope = E2EECrypto(passphrase="right").encrypt_sync("secret")
     with pytest.raises(AssertionError) as excinfo:
@@ -309,7 +313,7 @@ def test_e2ee_wrong_passphrase_fails_the_same_way_across_sdks() -> None:
 # -- Pure functions ----------------------------------------------------------
 
 
-@requires_interop
+@requires_node
 def test_path_normalization_agrees_across_sdks() -> None:
     """A disagreement here means the two SDKs write to different folders."""
     from byoc.paths import encode_path_segments, normalize_virtual_path

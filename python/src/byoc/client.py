@@ -28,6 +28,8 @@ from .types import (
     StorageObject,
     StorageOutput,
     StorageQuota,
+    UploadGrant,
+    UploadGrantOptions,
     UploadOptions,
 )
 
@@ -315,6 +317,32 @@ class AsyncBYOC:
             expires_in_seconds=expires_in_seconds,
         )
         return url
+
+    async def create_upload_grant(
+        self, path: str, options: UploadGrantOptions | None = None
+    ) -> UploadGrant:
+        """Mint a capability the browser uses to upload straight to the user's cloud.
+
+        This is the operation the whole project exists for: the bytes go from
+        the user's machine to the user's own storage, and this server sees a
+        path and a size but never any content. Return the grant from an API
+        route and hand it to ``uploadWithGrant`` from ``@byoc/browser``.
+
+        The grant is a bearer capability. Anyone holding it can write to that
+        one path until it expires, so keep the lifetime short and only issue
+        one after checking the caller is allowed to write there.
+        """
+        minter = getattr(self._current, "create_upload_grant", None)
+        if not self.capabilities().direct_upload or minter is None:
+            raise CapabilityUnsupportedError(
+                f"Provider '{self.manifest().name}' cannot issue upload grants, so a "
+                "browser cannot upload to it directly. Upload through this server instead.",
+                provider=self.manifest().id,
+            )
+        grant: UploadGrant = await minter(
+            self._require_path(path, "Upload grant"), options
+        )
+        return grant
 
     # -- recursive and batch operations ------------------------------------
 

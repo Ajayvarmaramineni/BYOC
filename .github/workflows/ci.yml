@@ -71,6 +71,17 @@ jobs:
       - name: Run unit and conformance suites
         run: pytest -q
 
+      - name: Static security scan
+        if: matrix.python-version == '3.13'
+        run: bandit -q -r src/byoc
+
+      - name: Dependency vulnerability audit
+        if: matrix.python-version == '3.13'
+        # --skip-editable: the project itself is installed with `pip install -e`,
+        # and pip-audit fails outright when it cannot find that version on PyPI.
+        # An unreleased version is the normal state on a feature branch.
+        run: pip-audit --skip-editable
+
   integration:
     name: Live integration (MinIO + WebDAV)
     runs-on: ubuntu-latest

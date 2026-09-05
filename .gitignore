@@ -54,3 +54,7 @@ pypi/
 
 # Created by the runnable quickstart examples
 byoc-demo-storage/
+
+# Not adopted: CI installs with pip from pyproject.toml ranges.
+# Regenerate with `uv lock` if we ever switch.
+uv.lock

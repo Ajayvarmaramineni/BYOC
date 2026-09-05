@@ -82,7 +82,7 @@ class MemoryProvider:
             category="self-hosted",
             authentication="local",
             supports_user_owned_storage=False,
-            adapter_version="0.3.0",
+            adapter_version="0.4.0",
         )
 
     def capabilities(self) -> ProviderCapabilities:
@@ -94,6 +94,8 @@ class MemoryProvider:
             versioning=False,
             quota=True,
             server_side_copy=True,
+            # Nothing is served over HTTP.
+            direct_upload=False,
         )
 
     # -- lifecycle ---------------------------------------------------------

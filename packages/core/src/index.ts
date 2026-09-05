@@ -20,7 +20,9 @@ export type {
   BackupOptions,
   BatchDeleteReport,
   BatchFailure,
-  SignedUrlOptions
+  SignedUrlOptions,
+  UploadGrant,
+  UploadGrantOptions
 } from "./types/storage.js";
 
 // Errors
@@ -51,6 +53,11 @@ export {
 export {
   E2EECrypto,
   EncryptedStorageWrapper,
+  E2EE_MAGIC_HEADER_V3,
+  E2EE_V3_HEADER_LENGTH,
+  E2EE_V3_DEFAULT_FRAME_SIZE,
+  E2EE_V3_MIN_FRAME_SIZE,
+  E2EE_V3_MAX_FRAME_SIZE,
   type E2EEOptions
 } from "./encryption/e2ee.js";
 

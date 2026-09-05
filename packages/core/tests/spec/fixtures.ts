@@ -41,7 +41,9 @@ export interface E2EEEnvelopeFixture {
     version: string;
     passphrase: string;
     iterations: number;
+    frame_size?: number;
     salt_hex: string;
+    nonce_base_hex?: string;
     iv_hex: string;
     plaintext_utf8: string;
     derived_key_hex: string;

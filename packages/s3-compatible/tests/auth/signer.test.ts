@@ -60,6 +60,18 @@ describe("AWS SigV4 Signer & Canonicalization", () => {
     expect(signedWithUpper.Authorization).toContain("content-type;host;x-amz-content-sha256;x-amz-date;x-amz-meta-author");
   });
 
+  it("signs one-shot streams with the SigV4 UNSIGNED-PAYLOAD sentinel", () => {
+    const signed = signS3Request(options, {
+      method: "PUT",
+      url: "https://examplebucket.s3.amazonaws.com/large.bin",
+      payloadHash: "UNSIGNED-PAYLOAD",
+      datetime: fixedDate
+    });
+
+    expect(signed["x-amz-content-sha256"]).toBe("UNSIGNED-PAYLOAD");
+    expect(signed.Authorization).toContain("x-amz-content-sha256");
+  });
+
   it("correctly encodes and sorts multi-parameter query strings with %20 (Bug #4 fix)", () => {
     const url = new URL("https://examplebucket.s3.amazonaws.com/?prefix=my+folder&list-type=2&delimiter=%2F");
     const canonicalQuery = buildCanonicalQueryString(url);
