@@ -21,7 +21,7 @@
     "clean": "rm -rf node_modules packages/*/node_modules packages/*/dist examples/*/node_modules"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^26.4.1",
     "typescript": "^5.4.5",
     "vitest": "^3.0.0"
   },
