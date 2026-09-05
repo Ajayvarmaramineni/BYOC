@@ -1,6 +1,6 @@
 {
-  "$comment": "BYOC E2EE envelope conformance vectors. The envelope is a binary format written into the user's cloud; a one-byte disagreement between SDKs makes encrypted files permanently unreadable. Algorithm: AES-256-GCM, key = PBKDF2-HMAC-SHA256(passphrase, salt, iterations, dkLen=32). The magic header, iteration field and salt are bound as GCM AAD. All hex is lowercase.",
-  "version": 1,
+  "$comment": "BYOC E2EE envelope conformance vectors. The envelope is a binary format written into the user's cloud; a one-byte disagreement between SDKs makes encrypted files permanently unreadable. V3 uses independently authenticated frames for bounded-memory streaming. All hex is lowercase.",
+  "version": 2,
   "algorithm": {
     "cipher": "AES-256-GCM",
     "kdf": "PBKDF2-HMAC-SHA256",
@@ -9,7 +9,9 @@
     "iv_length_bytes": 12,
     "tag_length_bytes": 16,
     "iter_field_length_bytes": 4,
-    "iter_field_encoding": "uint32 big-endian"
+    "iter_field_encoding": "uint32 big-endian",
+    "v3_header_length_bytes": 44,
+    "v3_frame_prefix_bytes": 20
   },
   "iteration_bounds": {
     "min": 10000,
@@ -17,6 +19,14 @@
     "$comment": "Read from untrusted storage before the GCM tag can authenticate it, so it MUST be range-checked before key derivation. Out-of-range MUST raise BYOC_CORRUPTED_DATA without deriving a key."
   },
   "layouts": {
+    "V3": [
+      "MAGIC(12)",
+      "ITER(4)",
+      "FRAME_SIZE(4)",
+      "SALT(16)",
+      "NONCE_BASE(8)",
+      "FRAME_LEN(4) || TAG(16) || CIPHERTEXT(FRAME_LEN), repeated"
+    ],
     "V2": [
       "MAGIC(12)",
       "ITER(4)",
@@ -34,10 +44,27 @@
     ]
   },
   "aad": {
+    "V3": "HEADER(44) || FRAME_INDEX(uint32 BE) || IS_FINAL(1 byte)",
     "V2": "MAGIC || ITER || SALT",
     "V1": "MAGIC || SALT"
   },
   "vectors": [
+    {
+      "name": "V3 framed envelope, one final frame",
+      "version": "V3",
+      "magic": "BYOC_E2EE_V3",
+      "passphrase": "correct-horse-battery-staple",
+      "iterations": 600000,
+      "frame_size": 4096,
+      "salt_hex": "000102030405060708090a0b0c0d0e0f",
+      "nonce_base_hex": "1011121314151617",
+      "iv_hex": "101112131415161700000000",
+      "plaintext_utf8": "BYOC cross-SDK conformance payload",
+      "derived_key_hex": "bd012c265e9e3c0931ca12018be26efe1b5d6355bc3c72acf8dbc0cb811a0107",
+      "tag_hex": "13920cc0a52936f7155064eca3f8dd5f",
+      "ciphertext_hex": "7c8ce52fb8e27382f23b4dca6c67d6d257cb189991acbd7ae2c50a1553f8738f5e5a",
+      "envelope_hex": "42594f435f453245455f5633000927c000001000000102030405060708090a0b0c0d0e0f10111213141516170000002213920cc0a52936f7155064eca3f8dd5f7c8ce52fb8e27382f23b4dca6c67d6d257cb189991acbd7ae2c50a1553f8738f5e5a"
+    },
     {
       "name": "V2 envelope, 600000 iterations",
       "version": "V2",

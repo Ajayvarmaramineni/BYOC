@@ -1,13 +1,20 @@
 # Design: streaming I/O and chunked E2EE
 
-**Status:** proposed, targeting v0.3.0
+**Status:** V3 cryptographic framing implemented; provider transport work in progress for v0.4
 **Supersedes:** the buffered upload path and the `BYOC_E2EE_V2` envelope
+
+V3 is now the write format in both SDKs. TypeScript's encrypted wrapper streams
+through stream-capable providers, and streamed S3 requests use
+`UNSIGNED-PAYLOAD`. Python's cryptographic stream API is implemented, while its
+network adapters and migration path still need to consume streams without
+buffering. V1 and V2 remain read-compatible.
 
 ---
 
 ## The problem
 
-BYOC cannot handle a file larger than available memory.
+In v0.3, BYOC could not handle a file larger than available memory through every
+provider and encryption combination.
 
 ```
 Python adapters    reject streams outright: "Streaming uploads are not yet supported"
@@ -30,8 +37,8 @@ Two independent problems hide behind one symptom:
 2. **Cryptographic buffering.** AES-GCM produces one authentication tag over one
    message, so the whole plaintext must be processed before the tag is known.
 
-The second is why `EncryptedStorageWrapper` reports `resumableUploads: false`.
-Fixing transport alone would leave encryption unusable on large files.
+V3 fixes the cryptographic half. The remaining work is making every adapter honor
+the stream contract and adding durable provider-native upload checkpoints.
 
 ---
 
@@ -116,19 +123,19 @@ force minutes of PBKDF2. Both fields are range-checked before they are used:
 ```
 ITERATIONS   10_000 .. 2_000_000        (unchanged from V2)
 FRAME_SIZE   4_096  .. 8_388_608        (4 KiB .. 8 MiB)
-FRAME_LEN    0      .. FRAME_SIZE + 16  (a frame cannot exceed its declared size)
+FRAME_LEN    0      .. FRAME_SIZE       (the tag is stored separately)
 ```
 
-A violation raises `CORRUPTED_DATA` before any key derivation or allocation.
+An invalid iteration count raises `CORRUPTED_DATA` before key derivation. Invalid
+frame fields are rejected before their values drive a frame read or allocation.
 
 ### Compatibility
 
 `decrypt` dispatches on the magic header and keeps reading V1 and V2. `encrypt`
 always writes V3. Nothing previously written becomes unreadable.
 
-The buffered `encrypt_sync` / `decrypt_sync` entry points stay, implemented as thin
-wrappers that feed a single-shot iterator through the streaming path. Small payloads
-keep the simple API.
+The buffered `encrypt` / `decrypt` and Python `encrypt_sync` / `decrypt_sync`
+entry points stay and use the same V3 layout. Small payloads keep the simple API.
 
 ---
 
@@ -169,10 +176,16 @@ the entire body, which defeats streaming. There are two ways out:
 | `STREAMING-AWS4-HMAC-SHA256-PAYLOAD` | Per-chunk signatures, a second framing layer inside the request body, meaningful complexity |
 | `UNSIGNED-PAYLOAD` | One header change; the body is not covered by the signature |
 
-**Recommendation: `UNSIGNED-PAYLOAD`, for streaming uploads only.** The request is
+**Implemented: `UNSIGNED-PAYLOAD`, for streaming uploads only.** The request is
 still authenticated, and over TLS the body is still confidential and integrity-protected
 by the transport. This is what most S3 SDKs do for streams. Buffered uploads keep
 signing the real body hash, so nothing regresses for existing callers.
+
+S3-compatible servers are not uniform about transfer-encoded request bodies.
+MinIO requires `Content-Length` for this PUT form, so portable stream uploads require
+`UploadOptions.contentLength`. The encrypted wrapper computes the exact V3 envelope
+length from that plaintext length. Unknown-length S3 streams fail before network I/O
+until multipart checkpoints provide a portable alternative.
 
 This is a security-relevant tradeoff and belongs in `SECURITY.md`, not buried in an
 adapter. Callers who need body-level signing can pass `bytes` and get the current
@@ -202,12 +215,11 @@ The current fixtures pin byte formats. They cannot catch the divergence that alr
 exists, where TypeScript streams and Python does not, because both produce the same
 stored bytes. Streaming needs behavioural coverage.
 
-**`spec/fixtures/e2ee-envelope.json` gains V3 vectors.** With `SALT` and `NONCE_BASE`
-fixed, the envelope is byte-reproducible, so both SDKs can assert an exact hex match
-as they do for V2 today. Add vectors for: an empty payload, a payload smaller than
-one frame, and a payload spanning three frames.
+**`spec/fixtures/e2ee-envelope.json` contains a deterministic V3 vector.** With
+`SALT` and `NONCE_BASE` fixed, both SDKs assert an exact envelope match. Generated
+security tests cover empty payloads and payloads spanning multiple frames.
 
-**New rejection cases**, each of which must raise before any allocation:
+**New rejection cases**, with hostile lengths rejected before they drive allocation:
 
 - final frame removed (truncation)
 - frames 1 and 2 swapped (reordering)
@@ -233,19 +245,18 @@ off frame boundaries. This is the test that would have caught the current diverg
 
 Each step lands green and independently useful.
 
-| Step | Work | Why this order |
+| Step | Status | Work |
 | :--- | :--- | :--- |
-| 1 | V3 envelope in Python, buffered API on top | Format first, no transport changes to confuse failures |
-| 2 | V3 in TypeScript, cross-SDK vectors | Locks the format before anything depends on it |
-| 3 | Streaming download, both SDKs | Simpler than upload, no signing questions |
-| 4 | Streaming upload: WebDAV, then Drive, then S3 | Increasing difficulty; S3 last because of the SigV4 decision |
-| 5 | `streaming.json` and interop coverage | Proves the SDKs did not drift |
-| 6 | Wire E2EE into the streaming path | Only now can `resumableUploads` stop being forced to `false` |
-| 7 | Python migration streams | Removes the last full-file buffer |
+| 1 | Done | V3 envelope in Python with buffered and streaming APIs |
+| 2 | Done | V3 in TypeScript with a shared deterministic cross-SDK vector |
+| 3 | Partial | Core decryption streams; Python network downloads still buffer |
+| 4 | Partial | TypeScript WebDAV/S3 streams; S3 was exercised against live MinIO, while Drive and Python network adapters need work |
+| 5 | Partial | Adversarial chunk-boundary, runtime interop, and an 8 MiB live encrypted MinIO transfer pass; the large live transport fixture remains |
+| 6 | TypeScript done | Encrypted wrapper streams and preserves resumable capability |
+| 7 | Pending | Python migration streams |
 
-Steps 1 and 2 are the risky ones. Step 6 is the payoff: `EncryptedStorageWrapper`
-stops overriding `resumableUploads` to `false`, and encryption composes with
-multi-gigabyte uploads.
+The wire-format risk is now pinned by both SDKs. The next payoff is end-to-end
+bounded memory in every network adapter, measured with a multi-gigabyte fixture.
 
 ## Open questions
 
@@ -258,6 +269,6 @@ the alignment constant alone.
 frame's length. Storing it explicitly costs 4 bytes and lets a reader validate every
 frame against a declared bound, which is worth more than the bytes.
 
-**Progress reporting for streams.** `UploadProgress.total_bytes` is currently derived
-from `len(payload)`. A stream of unknown length cannot provide it. The field becomes
-`None`, and `percentage` with it. Callers relying on a percentage need to know that.
+**Progress reporting for streams.** A stream of unknown length cannot provide a
+percentage. TypeScript callers can now supply `UploadOptions.contentLength`; Python
+has the matching contract but its adapters do not consume streams yet.

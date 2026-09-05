@@ -86,7 +86,7 @@ describe("Spec conformance: E2EE envelope", () => {
   // a correct plaintext with a wrong layout would still break the other SDK.
   it.each(fx.vectors)("envelope framing matches spec: $name", (vec) => {
     const env = Buffer.from(vec.envelope_hex, "hex");
-    const hasIter = vec.version === "V2";
+    const hasIter = vec.version === "V2" || vec.version === "V3";
     let offset = 0;
 
     expect(env.subarray(offset, offset + 12).toString()).toBe(`BYOC_E2EE_${vec.version}`);
@@ -97,8 +97,27 @@ describe("Spec conformance: E2EE envelope", () => {
       offset += 4;
     }
 
+    if (vec.version === "V3") {
+      expect(env.subarray(offset, offset + 4).readUInt32BE(0)).toBe(vec.frame_size);
+      offset += 4;
+    }
+
     expect(env.subarray(offset, offset + 16).toString("hex")).toBe(vec.salt_hex);
     offset += 16;
+
+    if (vec.version === "V3") {
+      expect(env.subarray(offset, offset + 8).toString("hex")).toBe(vec.nonce_base_hex);
+      offset += 8;
+      expect(env.subarray(offset, offset + 4).readUInt32BE(0)).toBe(
+        Buffer.from(vec.ciphertext_hex, "hex").length
+      );
+      offset += 4;
+      expect(env.subarray(offset, offset + 16).toString("hex")).toBe(vec.tag_hex);
+      offset += 16;
+      expect(env.subarray(offset).toString("hex")).toBe(vec.ciphertext_hex);
+      return;
+    }
+
     expect(env.subarray(offset, offset + 12).toString("hex")).toBe(vec.iv_hex);
     offset += 12;
     expect(env.subarray(offset, offset + 16).toString("hex")).toBe(vec.tag_hex);
@@ -109,7 +128,7 @@ describe("Spec conformance: E2EE envelope", () => {
   it("round-trips its own output through the declared bounds", async () => {
     const crypto = new E2EECrypto({ passphrase: "spec-conformance-passphrase" });
     const envelope = await crypto.encrypt("round trip");
-    expect(Buffer.from(envelope.subarray(0, 12)).toString()).toBe("BYOC_E2EE_V2");
+    expect(Buffer.from(envelope.subarray(0, 12)).toString()).toBe("BYOC_E2EE_V3");
     const iterations = Buffer.from(envelope.subarray(12, 16)).readUInt32BE(0);
     expect(iterations).toBeGreaterThanOrEqual(fx.iteration_bounds.min);
     expect(iterations).toBeLessThanOrEqual(fx.iteration_bounds.max);

@@ -64,15 +64,31 @@ const report = await storage.migrate({
 
 ## Client-side encryption
 
-`EncryptedStorageWrapper` wraps any provider so plaintext never leaves the process. Payloads are buffered, so it does not currently support resumable/streaming uploads; the wrapper reports `resumableUploads: false` accordingly.
+`EncryptedStorageWrapper` wraps any provider so plaintext never leaves the process.
+New objects use the framed `BYOC_E2EE_V3` format, and uploads are encrypted as a
+stream with memory bounded by the configured frame size. V1 and V2 objects remain
+readable.
 
 ```ts
 import { EncryptedStorageWrapper } from "@byoc/core";
 
 const secure = new EncryptedStorageWrapper(gdrive, {
-  passphrase: process.env.USER_PASSPHRASE!
+  passphrase: process.env.USER_PASSPHRASE!,
+  frameSize: 256 * 1024
+});
+
+await secure.upload("videos/demo.mp4", videoStream, {
+  contentLength: videoSize,
+  mimeType: "video/mp4"
 });
 ```
+
+For direct pipelines, `E2EECrypto.encryptStream()` and
+`E2EECrypto.decryptStream()` accept iterables of byte chunks. Provider transport
+support still varies: TypeScript Local, WebDAV, and S3 consume streams directly;
+S3 requires an exact `contentLength`, and Google Drive currently buffers before
+its resumable upload loop. `encryptedSize()` returns the exact V3 length when a
+custom pipeline needs to set its own transport header.
 
 ## Provider independence
 
