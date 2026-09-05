@@ -33,6 +33,7 @@ import sys
 import time
 import uuid
 import webbrowser
+from collections.abc import AsyncIterator
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Thread
 from urllib.parse import parse_qs, urlparse
@@ -215,6 +216,78 @@ async def main() -> int:
         results.append(
             check("resumable content round-trip", await storage.read_bytes("large/blob.bin") == big)
         )
+
+        # The check above passes `bytes`, which takes the buffered resumable
+        # path. Streaming is a different code path entirely: it opens the
+        # session without a declared length and has to classify each chunk as
+        # final or not on the fly. Passing one does not exercise the other.
+        streamed_size = 5 * 256 * 1024 + 1234  # several full chunks, ragged tail
+        streamed_seen: list[int] = []
+
+        async def streamed_source() -> AsyncIterator[bytes]:
+            step = 100_000  # deliberately not chunk-aligned
+            remaining = streamed_size
+            while remaining > 0:
+                size = min(step, remaining)
+                remaining -= size
+                yield b"s" * size
+
+        written = await storage.upload(
+            "large/streamed.bin",
+            streamed_source(),
+            UploadOptions(
+                chunk_size=chunk_size,
+                on_progress=lambda p: streamed_seen.append(p.bytes_uploaded),
+            ),
+        )
+        results.append(
+            check(
+                "streamed upload reports the right size",
+                written.size == streamed_size,
+                f"{written.size} bytes, expected {streamed_size}",
+            )
+        )
+        results.append(
+            check(
+                "streamed upload reports progress",
+                bool(streamed_seen) and streamed_seen == sorted(streamed_seen),
+                f"{len(streamed_seen)} events, last={streamed_seen[-1] if streamed_seen else 0}",
+            )
+        )
+        results.append(
+            check(
+                "streamed content round-trip",
+                await storage.read_bytes("large/streamed.bin") == b"s" * streamed_size,
+            )
+        )
+
+        # A single full chunk is the case the lookahead exists for: it fills the
+        # buffer exactly, and a naive implementation ships it as non-final and
+        # is then left with nothing to finalise the upload with.
+        exact_seen: list[int] = []
+
+        async def exact_source() -> AsyncIterator[bytes]:
+            yield b"e" * chunk_size
+
+        exact = await storage.upload(
+            "large/exact.bin",
+            exact_source(),
+            UploadOptions(
+                chunk_size=chunk_size,
+                on_progress=lambda p: exact_seen.append(p.bytes_uploaded),
+            ),
+        )
+        results.append(
+            check(
+                "streamed upload of exactly one chunk",
+                exact.size == chunk_size
+                and await storage.read_bytes("large/exact.bin") == b"e" * chunk_size,
+                f"{exact.size} bytes",
+            )
+        )
+
+        await storage.delete("large/streamed.bin")
+        await storage.delete("large/exact.bin")
 
         await storage.delete("docs/hello.md")
         results.append(check("delete removes the file", not await storage.exists("docs/hello.md")))
