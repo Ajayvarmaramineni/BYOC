@@ -8,7 +8,14 @@ readable by the other -- including client-side encrypted files.
 from __future__ import annotations
 
 from .client import AsyncBYOC, lookup_mime_type
-from .encryption import E2EECrypto
+from .encryption import (
+    E2EE_MAGIC_HEADER_V3,
+    E2EE_V3_DEFAULT_FRAME_SIZE,
+    E2EE_V3_HEADER_LENGTH,
+    E2EE_V3_MAX_FRAME_SIZE,
+    E2EE_V3_MIN_FRAME_SIZE,
+    E2EECrypto,
+)
 from .errors import (
     AuthRequiredError,
     BYOCErrorCode,
@@ -62,6 +69,8 @@ from .types import (
     StorageObject,
     StorageOutput,
     StorageQuota,
+    UploadGrant,
+    UploadGrantOptions,
     UploadOptions,
     UploadProgress,
 )
@@ -69,6 +78,11 @@ from .types import (
 __version__ = "0.3.0"
 
 __all__ = [
+    "E2EE_MAGIC_HEADER_V3",
+    "E2EE_V3_DEFAULT_FRAME_SIZE",
+    "E2EE_V3_HEADER_LENGTH",
+    "E2EE_V3_MAX_FRAME_SIZE",
+    "E2EE_V3_MIN_FRAME_SIZE",
     "AsyncBYOC",
     "AuthRequiredError",
     "AuthType",
@@ -109,6 +123,8 @@ __all__ = [
     "StorageQuota",
     "TokenExpiredError",
     "UploadFailedError",
+    "UploadGrant",
+    "UploadGrantOptions",
     "UploadOptions",
     "UploadProgress",
     "__version__",

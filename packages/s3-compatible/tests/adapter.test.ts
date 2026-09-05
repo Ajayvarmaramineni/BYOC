@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Readable } from "node:stream";
 import { S3CompatibleProvider } from "../src/adapter.js";
 import { BYOCErrorCode, StorageError } from "@byoc/core";
 
@@ -62,6 +63,106 @@ describe("S3CompatibleProvider", () => {
         })
       })
     );
+  });
+
+  it("uses UNSIGNED-PAYLOAD for a streaming PUT instead of signing an empty body", async () => {
+    const provider = new S3CompatibleProvider(validConfig);
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      headers: new Headers({ etag: '"stream-etag"' })
+    });
+
+    await provider.upload("large/archive.bin", Readable.from([Buffer.from("chunk")]), {
+      contentLength: 5
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("large/archive.bin"),
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          "content-length": "5",
+          "x-amz-content-sha256": "UNSIGNED-PAYLOAD"
+        })
+      })
+    );
+  });
+
+  it("sends an unknown-length stream as a multipart upload", async () => {
+    // S3 answers 411 Length Required to a chunked PUT, so a stream whose size
+    // is not known up front cannot go in a single request. Multipart is the
+    // way round it: each part carries its own Content-Length.
+    const provider = new S3CompatibleProvider(validConfig);
+
+    (global.fetch as any)
+      // 1. initiate
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () =>
+          "<InitiateMultipartUploadResult><UploadId>upload-1</UploadId></InitiateMultipartUploadResult>"
+      })
+      // 2. the single part
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ etag: '"part-etag"' }),
+        text: async () => ""
+      })
+      // 3. complete
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () =>
+          "<CompleteMultipartUploadResult><ETag>&quot;final&quot;</ETag></CompleteMultipartUploadResult>"
+      });
+
+    const result = await provider.upload(
+      "large/unknown.bin",
+      Readable.from([Buffer.from("chunk")])
+    );
+
+    expect(result.size).toBe(5);
+
+    const urls = (global.fetch as any).mock.calls.map(([url]: [string]) => String(url));
+    expect(urls[0]).toContain("uploads=");
+    expect(urls[1]).toContain("partNumber=1");
+    expect(urls[1]).toContain("uploadId=upload-1");
+    expect(urls[2]).toContain("uploadId=upload-1");
+  });
+
+  it("aborts the multipart upload when a part fails, so parts stop accruing cost", async () => {
+    const provider = new S3CompatibleProvider(validConfig);
+
+    (global.fetch as any)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        text: async () =>
+          "<InitiateMultipartUploadResult><UploadId>upload-2</UploadId></InitiateMultipartUploadResult>"
+      })
+      // Every retry of the part fails.
+      .mockResolvedValue({
+        ok: false,
+        status: 403,
+        headers: new Headers(),
+        text: async () => "AccessDenied"
+      });
+
+    await expect(
+      provider.upload("large/fails.bin", Readable.from([Buffer.from("chunk")]))
+    ).rejects.toThrow();
+
+    const calls = (global.fetch as any).mock.calls;
+    const aborted = calls.some(
+      ([url, init]: [string, any]) =>
+        init?.method === "DELETE" && String(url).includes("uploadId=upload-2")
+    );
+    expect(aborted, "a failed multipart upload must be aborted").toBe(true);
   });
 
   it("handles AWS S3 standard endpoint path-style addressing when bucket is not in hostname", () => {

@@ -7,7 +7,9 @@ import type {
   StorageOutput,
   StorageQuota,
   UploadOptions,
-  BackupOptions
+  BackupOptions,
+  UploadGrant,
+  UploadGrantOptions
 } from "@byoc/core";
 import {
   BYOCErrorCode,
@@ -87,7 +89,8 @@ export class GoogleDriveProvider implements BYOCProvider {
       resumableUploads: true,
       versioning: false,
       quota: true,
-      serverSideCopy: true
+      serverSideCopy: true,
+      directUpload: true
     };
   }
 
@@ -225,6 +228,63 @@ export class GoogleDriveProvider implements BYOCProvider {
   /**
    * Server-side instant copy in Google Drive using files.copy without re-uploading bytes.
    */
+  /**
+   * Opens a resumable session and hands back its URI as an upload grant.
+   *
+   * Unlike S3's signed URL, this is not a signature over a path -- Drive has
+   * already created the pending file, and the session URI is the only way to
+   * write to it. Two consequences worth knowing:
+   *
+   *  - `sizeBytes` is required. Drive wants X-Upload-Content-Length up front,
+   *    and a session opened with the wrong total rejects the final chunk.
+   *  - Sessions last about a week, far longer than a signed URL, so this
+   *    still honours `expiresInSeconds` and reports the earlier of the two.
+   */
+  public async createUploadGrant(
+    path: string,
+    options: UploadGrantOptions = {}
+  ): Promise<UploadGrant> {
+    const normalized = normalizeVirtualPath(path);
+    if (options.sizeBytes === undefined) {
+      throw new StorageError({
+        code: BYOCErrorCode.INVALID_INPUT,
+        message:
+          "Google Drive needs the total size before opening a resumable session. " +
+          "Pass sizeBytes (file.size in the browser) when creating the grant.",
+        provider: "google-drive",
+        retryable: false
+      });
+    }
+
+    const parentFolderId = await this.resolver.resolveParentFolderId(normalized);
+    const mimeType = options.mimeType ?? "application/octet-stream";
+
+    const sessionUri = await this.uploader.createSession(
+      {
+        name: getBasename(normalized),
+        parents: [parentFolderId],
+        mimeType,
+        appProperties: { byocVirtualPath: normalized }
+      },
+      options.sizeBytes,
+      mimeType
+    );
+
+    const expiresInSeconds = options.expiresInSeconds ?? 900;
+    return {
+      provider: "google-drive",
+      path: normalized,
+      url: sessionUri,
+      method: "PUT",
+      headers: {},
+      protocol: "resumable",
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
+      // Drive requires every chunk but the last to be a multiple of 256 KiB.
+      chunkSize: 8 * 1024 * 1024,
+      maxBytes: options.sizeBytes
+    };
+  }
+
   public async copy(source: string, destination: string): Promise<void> {
     const sourceNorm = normalizeVirtualPath(source);
     const destNorm = normalizeVirtualPath(destination);

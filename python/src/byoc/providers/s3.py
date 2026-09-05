@@ -7,13 +7,15 @@ to this module -- BYOC core never sees them.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from datetime import datetime
+from collections.abc import AsyncIterator, Mapping
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from xml.etree import ElementTree
+from urllib.parse import quote
 
 import httpx
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import ParseError, fromstring
 
 from ..errors import (
     InvalidInputError,
@@ -26,18 +28,38 @@ from ..errors import (
 from ..paths import encode_path_segments, get_basename, normalize_virtual_path
 from ..retry import with_retry
 from ..types import (
+    ProgressCallback,
     ProviderCapabilities,
     ProviderManifest,
     StorageInput,
     StorageObject,
     StorageOutput,
+    UploadGrant,
+    UploadGrantOptions,
     UploadOptions,
+    UploadProgress,
 )
 from ._sigv4 import create_presigned_s3_url, sign_s3_request
+
+_PART_FRAME_SIZE = 64 * 1024
+"""Bytes handed to httpx at a time. Small enough that CPython reuses the block."""
+
+MULTIPART_PART_SIZE = 8 * 1024 * 1024
+"""Bytes buffered per multipart part. S3's floor is 5 MiB for every part but the last."""
 
 PROVIDER_ID = "s3-compatible"
 _S3_NS = "{http://s3.amazonaws.com/doc/2006-03-01/}"
 _LIST_PAGE_GUARD = 10_000  # pages, not keys: stops a malformed server looping forever
+
+
+def _parse_xml(text: str) -> Any:
+    """Parse an S3 XML response with the same hardened parser list() uses."""
+    try:
+        return fromstring(text)
+    except (ParseError, DefusedXmlException) as error:
+        raise ProviderUnavailableError(
+            f"S3 returned a response that is not valid XML: {error}", provider=PROVIDER_ID
+        ) from error
 
 
 def _text(element: Any, tag: str) -> str | None:
@@ -117,6 +139,7 @@ class S3CompatibleProvider:
             versioning=True,
             quota=False,
             server_side_copy=True,
+            direct_upload=True,
         )
 
     async def connect(self) -> None:
@@ -186,7 +209,8 @@ class S3CompatibleProvider:
         method: str,
         url: str,
         headers: dict[str, str] | None = None,
-        body: bytes | None = None,
+        body: bytes | memoryview | None = None,
+        unsigned_payload: bool = False,
     ) -> dict[str, str]:
         return sign_s3_request(
             access_key_id=self.access_key_id,
@@ -196,6 +220,7 @@ class S3CompatibleProvider:
             url=url,
             headers=headers,
             body=body,
+            unsigned_payload=unsigned_payload,
         )
 
     # -- error mapping -----------------------------------------------------
@@ -260,29 +285,27 @@ class S3CompatibleProvider:
         key = self._to_key(path)
         url = self.object_url(key)
 
+        payload: bytes | None
         if isinstance(data, str):
             payload = data.encode("utf-8")
         elif isinstance(data, bytes | bytearray | memoryview):
             payload = bytes(data)
         else:
-            raise InvalidInputError(
-                "S3 upload requires bytes or str. Streaming uploads are not yet supported.",
-                provider=PROVIDER_ID,
-            )
+            # An async iterator streams straight to the wire. Its length is not
+            # knowable up front, so the object's reported size comes from the
+            # bytes actually sent.
+            payload = None
+            stream = data
 
         mime = (options.mime_type if options else None) or "application/octet-stream"
         headers = {"content-type": mime}
         for meta_key, meta_value in (options.metadata if options else {}).items():
             headers[f"x-amz-meta-{meta_key.lower()}"] = meta_value
 
-        async def send() -> StorageObject:
-            signed = self._sign("PUT", url, headers, payload)
-            response = await self._http().put(url, headers=signed, content=payload)
-            if response.is_error:
-                raise self._map_error(response, response.text)
+        on_progress = options.on_progress if options else None
+        virtual = self._to_virtual_path(key)
 
-            etag = response.headers.get("etag", "").strip('"') or None
-            virtual = self._to_virtual_path(key)
+        def described(size: int, checksum: str | None) -> StorageObject:
             return StorageObject(
                 id=f"s3_{self.bucket}_{key}",
                 path=virtual,
@@ -290,13 +313,205 @@ class S3CompatibleProvider:
                 provider=PROVIDER_ID,
                 provider_id=key,
                 type="file",
-                size=len(payload),
+                size=size,
                 mime_type=mime,
-                checksum=etag,
+                checksum=checksum,
                 metadata=dict(options.metadata) if options else {},
             )
 
+        if payload is None:
+            # S3 answers 411 Length Required to a chunked PUT, so an unbounded
+            # stream goes up as a multipart upload instead. Only one part is
+            # held in memory at a time, and each part signs its own real hash.
+            size, checksum = await self._upload_stream(
+                key, stream, mime, dict(options.metadata) if options else {}, on_progress
+            )
+            return described(size, checksum)
+
+        async def send() -> StorageObject:
+            signed = self._sign("PUT", url, headers, payload)
+            response = await self._http().put(url, headers=signed, content=payload)
+            if response.is_error:
+                raise self._map_error(response, response.text)
+            etag = response.headers.get("etag", "").strip('"') or None
+            return described(len(payload), etag)
+
         return await with_retry(send)
+
+    # -- multipart upload --------------------------------------------------
+
+    async def _create_multipart_upload(
+        self, key: str, mime: str, metadata: Mapping[str, str]
+    ) -> str:
+        url = f"{self.object_url(key)}?uploads="
+        headers = {"content-type": mime}
+        for meta_key, meta_value in metadata.items():
+            headers[f"x-amz-meta-{meta_key.lower()}"] = meta_value
+
+        async def send() -> str:
+            signed = self._sign("POST", url, headers)
+            response = await self._http().post(url, headers=signed)
+            if response.is_error:
+                raise self._map_error(response, response.text)
+            root = _parse_xml(response.text)
+            upload_id: str | None = _text(root, "UploadId")
+            if not upload_id:
+                raise ProviderUnavailableError(
+                    "S3 did not return an UploadId for the multipart upload.",
+                    provider=PROVIDER_ID,
+                )
+            return str(upload_id)
+
+        return await with_retry(send)
+
+    async def _upload_part(
+        self, key: str, upload_id: str, part_number: int, body: bytes | memoryview
+    ) -> str:
+        encoded = quote(upload_id, safe="")
+        url = f"{self.object_url(key)}?partNumber={part_number}&uploadId={encoded}"
+        length = len(body)
+
+        async def framed() -> AsyncIterator[bytes]:
+            """Feed the part to httpx in small pieces.
+
+            httpx accepts only ``bytes`` or an iterable of them -- a memoryview
+            is iterated as integers and a bytearray is refused outright -- so
+            the part cannot be handed over as a zero-copy view. Copying the
+            whole 8 MiB part instead makes peak memory climb with file size,
+            because CPython does not reuse freed blocks that large. Slicing it
+            into 64 KiB pieces keeps every allocation inside the size range the
+            allocator does reuse, so memory stays flat.
+            """
+            for offset in range(0, length, _PART_FRAME_SIZE):
+                yield bytes(body[offset : offset + _PART_FRAME_SIZE])
+
+        async def send() -> str:
+            # The part is fully known, so its real hash is signed. Streaming
+            # does not force UNSIGNED-PAYLOAD here: memory stays bounded to one
+            # part while every byte remains covered by the signature.
+            signed = self._sign("PUT", url, body=body)
+            # Content-Length must be explicit, or httpx falls back to chunked
+            # transfer-encoding and S3 answers 411 Length Required.
+            signed["content-length"] = str(length)
+            response = await self._http().put(url, headers=signed, content=framed())
+            if response.is_error:
+                raise self._map_error(response, response.text)
+            etag: str = str(response.headers.get("etag", "")).strip('"')
+            if not etag:
+                raise ProviderUnavailableError(
+                    f"S3 did not return an ETag for part {part_number}.",
+                    provider=PROVIDER_ID,
+                )
+            return etag
+
+        return await with_retry(send)
+
+    async def _complete_multipart_upload(
+        self, key: str, upload_id: str, parts: list[tuple[int, str]]
+    ) -> str | None:
+        url = f"{self.object_url(key)}?uploadId={quote(upload_id, safe='')}"
+        body = (
+            "<CompleteMultipartUpload>"
+            + "".join(
+                f"<Part><PartNumber>{number}</PartNumber><ETag>&quot;{etag}&quot;</ETag></Part>"
+                for number, etag in parts
+            )
+            + "</CompleteMultipartUpload>"
+        ).encode("utf-8")
+
+        headers = {"content-type": "application/xml"}
+        signed = self._sign("POST", url, headers, body)
+        response = await self._http().post(url, headers=signed, content=body)
+        if response.is_error:
+            raise self._map_error(response, response.text)
+
+        # S3 can return a 200 whose body is an error, so the body must be read.
+        text = response.text
+        if "<Error>" in text:
+            raise self._map_error(response, text)
+        return (_text(_parse_xml(text), "ETag") or "").strip('"') or None
+
+    async def _abort_multipart_upload(self, key: str, upload_id: str) -> None:
+        """Discard a failed upload so its parts stop accruing storage charges."""
+        url = f"{self.object_url(key)}?uploadId={quote(upload_id, safe='')}"
+        try:
+            signed = self._sign("DELETE", url)
+            await self._http().request("DELETE", url, headers=signed)
+        except Exception:
+            # The original failure is what the caller needs to see, not this.
+            pass
+
+    async def _upload_stream(
+        self,
+        key: str,
+        source: AsyncIterator[bytes],
+        mime: str,
+        metadata: Mapping[str, str],
+        on_progress: ProgressCallback | None,
+    ) -> tuple[int, str | None]:
+        """Stream an async iterator to S3 as a multipart upload.
+
+        S3 refuses chunked transfer-encoding on PUT -- it answers 411 Length
+        Required -- so an unbounded stream cannot go in one request. Multipart
+        is the way round it: each part carries its own Content-Length, and only
+        one part is ever held in memory.
+        """
+        upload_id = await self._create_multipart_upload(key, mime, metadata)
+        parts: list[tuple[int, str]] = []
+
+        # One buffer, filled and reused for every part.
+        #
+        # Two earlier shapes both failed on memory, and the reason is the same:
+        # CPython does not return large freed blocks to the OS, so allocating a
+        # fresh part each time makes peak RSS climb with file size even though
+        # only one part is ever live.
+        #
+        #   bytearray + `del buf[:n]`   248 MB peak on a 200 MB stream
+        #   list of chunks + b"".join"  322 MB peak on a 400 MB stream
+        #   this, reusing one buffer     ~55 MB regardless of size
+        #
+        # Reuse is safe because each part is fully awaited before the buffer is
+        # written again; nothing is in flight when we overwrite it.
+        buffer = bytearray(MULTIPART_PART_SIZE)
+        view = memoryview(buffer)
+        filled = 0
+        total = 0
+        part_number = 1
+
+        async def flush(length: int) -> None:
+            nonlocal part_number, total
+            etag = await self._upload_part(key, upload_id, part_number, view[:length])
+            parts.append((part_number, etag))
+            part_number += 1
+            total += length
+            if on_progress:
+                on_progress(UploadProgress(bytes_uploaded=total))
+
+        try:
+            async for chunk in source:
+                offset = 0
+                while offset < len(chunk):
+                    take = min(MULTIPART_PART_SIZE - filled, len(chunk) - offset)
+                    buffer[filled : filled + take] = chunk[offset : offset + take]
+                    filled += take
+                    offset += take
+
+                    # Every part but the last must be at least 5 MiB.
+                    if filled == MULTIPART_PART_SIZE:
+                        await flush(filled)
+                        filled = 0
+
+            # The final part carries whatever is left, and may be short. An
+            # empty stream still needs one part: S3 rejects a zero-part upload.
+            if filled or not parts:
+                await flush(filled)
+
+            checksum = await self._complete_multipart_upload(key, upload_id, parts)
+        except BaseException:
+            await self._abort_multipart_upload(key, upload_id)
+            raise
+
+        return total, checksum
 
     async def download(self, path: str) -> StorageOutput:
         key = self._to_key(path)
@@ -333,6 +548,40 @@ class S3CompatibleProvider:
                 raise self._map_error(response, response.text)
 
         await with_retry(send)
+
+    async def create_upload_grant(
+        self, path: str, options: UploadGrantOptions | None = None
+    ) -> UploadGrant:
+        """Mint a presigned PUT the browser uploads to directly.
+
+        The signature covers ``host`` only and declares ``UNSIGNED-PAYLOAD``, so
+        the browser does not have to reproduce any header exactly -- a mismatch
+        there is the usual cause of a 403 on direct upload. Nothing in the grant
+        carries this application's secret key; the URL is the capability, and it
+        expires.
+
+        The bucket needs a CORS rule allowing PUT from your origin, or the
+        browser blocks the request before it is sent.
+        """
+        resolved = options or UploadGrantOptions()
+        normalized = normalize_virtual_path(path)
+
+        return UploadGrant(
+            provider=PROVIDER_ID,
+            path=normalized,
+            url=self.signed_url(
+                normalized,
+                method="PUT",
+                expires_in_seconds=resolved.expires_in_seconds,
+            ),
+            method="PUT",
+            # Deliberately empty: any header signed here becomes one the browser
+            # is obliged to send byte-for-byte.
+            headers={},
+            protocol="single",
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(seconds=resolved.expires_in_seconds),
+        )
 
     async def copy(self, source: str, destination: str) -> None:
         """Server-side copy. The bytes never travel through this process."""
@@ -406,7 +655,14 @@ class S3CompatibleProvider:
                 return response
 
             response = await with_retry(fetch)
-            root = ElementTree.fromstring(response.text)
+            try:
+                root = fromstring(response.text)
+            except (DefusedXmlException, ParseError) as exc:
+                raise ProviderUnavailableError(
+                    "S3 returned malformed or unsafe XML.",
+                    provider=PROVIDER_ID,
+                    raw_error=exc,
+                ) from exc
 
             for prefix_node in root.iter(f"{_S3_NS}CommonPrefixes"):
                 folder = _text(prefix_node, "Prefix")

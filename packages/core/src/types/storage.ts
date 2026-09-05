@@ -64,6 +64,8 @@ export interface UploadProgress {
  */
 export interface UploadOptions {
   readonly mimeType?: string;
+  /** Exact byte length of the supplied input. Required for portable S3 streaming uploads. */
+  readonly contentLength?: number;
   readonly resumable?: boolean;
   readonly chunkSize?: number;
   readonly onProgress?: (progress: UploadProgress) => void;
@@ -117,4 +119,58 @@ export interface BatchDeleteReport {
 export interface SignedUrlOptions {
   readonly method?: string;
   readonly expiresInSeconds?: number;
+}
+
+/**
+ * A capability to upload one object, safe to hand to an untrusted client.
+ *
+ * The whole point of BYOC is that file bytes never pass through the
+ * application server. A grant is what makes that literal: the server signs or
+ * opens an upload, hands the browser this object, and the browser transfers
+ * the bytes straight to the user's own cloud.
+ *
+ * It is deliberately a plain data object -- JSON-serializable, no methods, no
+ * credentials of the application's own -- so it can be returned from an API
+ * route and consumed by `@byoc/browser`.
+ *
+ * Providers reach the same shape by different routes: S3 signs a PUT URL,
+ * Google Drive opens a resumable session whose URI is itself the capability.
+ * Neither requires the client to hold a long-lived secret.
+ */
+export interface UploadGrant {
+  /** Provider that issued it, so the client can pick the right transfer path. */
+  readonly provider: string;
+  /** Virtual path the bytes will land at. */
+  readonly path: string;
+  /** Absolute URL the client uploads to. Treat as a secret: it IS the capability. */
+  readonly url: string;
+  /** HTTP method the client must use. */
+  readonly method: "PUT" | "POST";
+  /**
+   * Headers the client must send verbatim. For a signed URL this is usually
+   * empty, because signing extra headers would force the browser to reproduce
+   * them exactly.
+   */
+  readonly headers: Record<string, string>;
+  /**
+   * "single" sends the whole body in one request. "resumable" allows chunked
+   * transfer with Content-Range, and survives a dropped connection.
+   */
+  readonly protocol: "single" | "resumable";
+  /** After this instant the grant is refused by the provider. */
+  readonly expiresAt: Date;
+  /** Chunk size in bytes for resumable transfers, when the provider requires alignment. */
+  readonly chunkSize?: number;
+  /** Provider-declared upper bound on the payload, when one applies. */
+  readonly maxBytes?: number;
+}
+
+/** Options when minting an {@link UploadGrant}. */
+export interface UploadGrantOptions {
+  /** Seconds until the grant expires. Keep it short; it is a bearer capability. */
+  readonly expiresInSeconds?: number;
+  /** Content type recorded on the stored object. */
+  readonly mimeType?: string;
+  /** Total size, when known. Some providers require it up front. */
+  readonly sizeBytes?: number;
 }

@@ -88,7 +88,9 @@ export class MemoryProvider implements BYOCProvider {
       resumableUploads: false,
       versioning: false,
       quota: true,
-      serverSideCopy: true
+      serverSideCopy: true,
+      // Nothing is served over HTTP.
+      directUpload: false
     };
   }
 

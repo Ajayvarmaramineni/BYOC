@@ -48,6 +48,21 @@ export class ResumableUploader {
   }
 
   /**
+   * Opens a resumable session without sending any bytes, and returns its URI.
+   *
+   * The session URI is a bearer capability: Drive accepts chunks at it with no
+   * Authorization header, which is exactly what lets a browser upload straight
+   * to the user's Drive while this server's OAuth token stays server-side.
+   */
+  public async createSession(
+    metadata: Record<string, unknown>,
+    totalBytes: number,
+    mimeType: string
+  ): Promise<string> {
+    return this.initiateSession(metadata, totalBytes, mimeType);
+  }
+
+  /**
    * Initiates a resumable upload session and extracts the Location session URI.
    */
   private async initiateSession(

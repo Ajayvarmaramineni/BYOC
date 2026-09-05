@@ -6,7 +6,9 @@ import type {
   StorageObject,
   StorageOutput,
   UploadOptions,
-  BackupOptions
+  BackupOptions,
+  UploadGrant,
+  UploadGrantOptions
 } from "@byoc/core";
 import {
   BYOCErrorCode,
@@ -60,7 +62,8 @@ export class S3CompatibleProvider implements BYOCProvider {
       resumableUploads: false, // High-level automatic multipart orchestration is planned for v0.2.0
       versioning: true,
       quota: false,
-      serverSideCopy: true
+      serverSideCopy: true,
+      directUpload: true
     };
   }
 
@@ -83,7 +86,8 @@ export class S3CompatibleProvider implements BYOCProvider {
       data,
       options?.mimeType,
       options?.metadata as Record<string, string>,
-      options?.onProgress
+      options?.onProgress,
+      options?.contentLength
     );
     return {
       ...result,
@@ -167,6 +171,38 @@ export class S3CompatibleProvider implements BYOCProvider {
   public getSignedUrl(path: string, options?: PresignUrlOptions): string {
     const key = this.toKey(path);
     return this.http.getPresignedUrl(key, options);
+  }
+
+  /**
+   * Mints a presigned PUT the browser uploads to directly.
+   *
+   * The signature covers `host` only and declares UNSIGNED-PAYLOAD, so the
+   * browser does not have to reproduce any header exactly -- a mismatch there
+   * is the usual cause of a 403 on direct upload. Nothing in the returned
+   * grant contains this application's credentials; the URL itself is the
+   * capability, and it expires.
+   *
+   * The bucket needs CORS allowing PUT from your origin, otherwise the browser
+   * blocks the request before it is sent. See docs/direct-upload.md.
+   */
+  public async createUploadGrant(
+    path: string,
+    options: UploadGrantOptions = {}
+  ): Promise<UploadGrant> {
+    const expiresInSeconds = options.expiresInSeconds ?? 900;
+    const key = this.toKey(path);
+
+    return {
+      provider: "s3-compatible",
+      path: normalizeVirtualPath(path),
+      url: this.http.getPresignedUrl(key, { method: "PUT", expiresInSeconds }),
+      method: "PUT",
+      // Deliberately empty: any header signed here becomes one the browser is
+      // obliged to send byte-for-byte.
+      headers: {},
+      protocol: "single",
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000)
+    };
   }
 
   public async backup(payload: StorageInput, options?: BackupOptions): Promise<StorageObject> {

@@ -181,3 +181,76 @@ async def test_presigned_url_is_accepted_by_the_server(provider: S3CompatiblePro
 
     assert response.status_code == 200, response.text
     assert response.content == b"PDF BYTES"
+
+
+@pytest.mark.integration
+async def test_streams_an_unknown_length_body_as_multipart(
+    provider: S3CompatibleProvider,
+) -> None:
+    """S3 answers 411 Length Required to a chunked PUT.
+
+    A stream whose size is not known up front therefore cannot go in one
+    request; it has to become a multipart upload. This exercises a payload
+    spanning several parts so the part-boundary logic is really used.
+    """
+    part = 8 * 1024 * 1024
+    total = part * 2 + 1024  # three parts, the last one short
+
+    async def chunks() -> AsyncIterator[bytes]:
+        remaining = total
+        while remaining > 0:
+            size = min(1024 * 1024, remaining)
+            remaining -= size
+            yield b"s" * size
+
+    written = await provider.upload("streamed/multipart.bin", chunks())
+
+    assert written.size == total
+    assert (await provider.metadata("streamed/multipart.bin")).size == total
+
+    downloaded = await (await provider.download("streamed/multipart.bin")).read()
+    assert len(downloaded) == total
+    assert downloaded == b"s" * total
+
+    await provider.delete("streamed/multipart.bin")
+
+
+@pytest.mark.integration
+async def test_streams_an_empty_body(provider: S3CompatibleProvider) -> None:
+    """S3 rejects a zero-part multipart upload, so an empty stream still needs one."""
+
+    async def nothing() -> AsyncIterator[bytes]:
+        return
+        yield b""  # pragma: no cover - makes this an async generator
+
+    written = await provider.upload("streamed/empty.bin", nothing())
+
+    assert written.size == 0
+    assert await (await provider.download("streamed/empty.bin")).read() == b""
+
+    await provider.delete("streamed/empty.bin")
+
+
+@pytest.mark.integration
+async def test_a_streamed_upload_reports_progress(
+    provider: S3CompatibleProvider,
+) -> None:
+    from byoc.types import UploadOptions
+
+    seen: list[int] = []
+
+    async def chunks() -> AsyncIterator[bytes]:
+        for _ in range(12):
+            yield b"p" * (1024 * 1024)
+
+    await provider.upload(
+        "streamed/progress.bin",
+        chunks(),
+        UploadOptions(on_progress=lambda p: seen.append(p.bytes_uploaded)),
+    )
+
+    assert seen, "a streamed upload must report progress"
+    assert seen == sorted(seen), "progress must not go backwards"
+    assert seen[-1] == 12 * 1024 * 1024
+
+    await provider.delete("streamed/progress.bin")

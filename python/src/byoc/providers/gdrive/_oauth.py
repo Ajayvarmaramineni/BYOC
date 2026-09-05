@@ -16,7 +16,8 @@ from ...errors import AuthRequiredError, InvalidInputError, TokenExpiredError
 from ._tokens import InMemoryTokenStorage, TokenSession, TokenStorage
 
 AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
-TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+# Public OAuth endpoint, not a credential.
+TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"  # nosec B105
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 
 

@@ -239,7 +239,7 @@ def test_encrypted_file_storage_roundtrip(tmp_path: Path) -> None:
     assert loaded.refresh_token == "rt"
     # The refresh token must not be readable on disk.
     assert b"rt" not in target.read_bytes()
-    assert target.read_bytes()[:12] == b"BYOC_E2EE_V2"
+    assert target.read_bytes()[:12] == b"BYOC_E2EE_V3"
 
 
 def test_encrypted_file_storage_is_owner_only(tmp_path: Path) -> None:

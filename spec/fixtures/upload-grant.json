@@ -1,0 +1,72 @@
+{
+  "$comment": "UploadGrant wire format. This IS a wire format, not an API surface: a grant is minted by a server in one language and consumed by a browser client in another, so the JSON key names are part of the cross-SDK contract in the same way the E2EE envelope's byte layout is. The canonical flagship case -- a FastAPI backend and a React frontend -- crosses this boundary on every upload. Key names are camelCase on the wire regardless of the producing language, matching provider-metadata.json's rule.",
+  "version": 1,
+
+  "wire_keys": {
+    "$comment": "Producers MUST emit these names exactly. A Python implementation writes 'expiresAt', not 'expires_at', even though snake_case is idiomatic internally.",
+    "required": ["provider", "path", "url", "method", "headers", "protocol"],
+    "optional": ["expiresAt", "chunkSize", "maxBytes"]
+  },
+
+  "absent_optionals": {
+    "rule": "omit",
+    "$comment": "An optional field that does not apply MUST be omitted, never serialized as null. This is not stylistic. A Python producer emitting \"maxBytes\": null made the TypeScript browser client reject every upload, because `size > null` coerces null to 0 and evaluates true in JavaScript. Producers omit; consumers must still tolerate null defensively, since other servers exist.",
+    "regression": {
+      "bad": { "maxBytes": null },
+      "good": {},
+      "symptom": "DirectUploadError: File is 3145728 bytes but this grant allows at most null."
+    }
+  },
+
+  "enums": {
+    "method": ["PUT", "POST"],
+    "protocol": {
+      "single": "the whole body is sent in one request",
+      "resumable": "chunked transfer with Content-Range, survives a dropped connection"
+    }
+  },
+
+  "field_rules": {
+    "url": {
+      "$comment": "The capability itself. Anyone holding it can write to that one path until it expires, so it must never be logged, cached in a URL bar, or embedded in a page served to a user other than the uploader.",
+      "must_not_contain": "the application's secret key",
+      "$comment_secret": "For SigV4 the access key ID DOES appear in X-Amz-Credential and that is correct and unavoidable; the secret access key never appears. Do not confuse the two when testing: MinIO's default credentials use the same string for both, which makes a naive substring check report a false leak."
+    },
+    "headers": {
+      "$comment": "Headers the client must reproduce verbatim. Prefer empty. Every header signed into an S3 presigned URL becomes one the browser is obliged to send byte-for-byte, and a mismatch is the usual cause of an otherwise-inexplicable 403.",
+      "prefer": {}
+    },
+    "expiresAt": {
+      "format": "ISO 8601 with timezone offset",
+      "on_absent": "treat as already expired",
+      "$comment": "Failing closed is the only safe reading of a missing bound on a bearer capability. A consumer MUST NOT treat a missing expiry as 'never expires'."
+    },
+    "chunkSize": {
+      "$comment": "Only meaningful when protocol is 'resumable'. Google Drive requires every chunk but the last to be a multiple of 256 KiB; a grant carrying a chunkSize that violates its provider's alignment will fail mid-transfer, not at the start."
+    }
+  },
+
+  "provider_shapes": {
+    "$comment": "Two providers reach the same shape by different routes. Both produce a URL a browser can write to with no credentials, which is the property that matters.",
+    "s3-compatible": {
+      "protocol": "single",
+      "mechanism": "SigV4 presigned PUT, signing UNSIGNED-PAYLOAD and the host header only",
+      "headers": {},
+      "path_is_bound": true,
+      "$comment": "The signature covers the object key, so a client cannot redirect the upload to a different path. Verified: editing the key in the URL yields HTTP 403 from the server."
+    },
+    "google-drive": {
+      "protocol": "resumable",
+      "mechanism": "resumable session URI from the Location header of an initiate call",
+      "headers": {},
+      "requires_size_up_front": true,
+      "$comment": "Drive wants X-Upload-Content-Length when the session opens, and a session opened with the wrong total rejects the final chunk. The session URI needs no Authorization header, which is what keeps the server's OAuth token server-side."
+    }
+  },
+
+  "providers_without_direct_upload": {
+    "webdav": "authenticates every request with Basic credentials, so there is no URL a browser can be handed without also handing it the password",
+    "local": "a local path is not reachable by a browser",
+    "memory": "nothing is served over HTTP"
+  }
+}

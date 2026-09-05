@@ -87,6 +87,8 @@ class LocalFileSystemProvider:
             versioning=False,
             quota=True,
             server_side_copy=True,
+            # A local path is not reachable by a browser.
+            direct_upload=False,
         )
 
     # -- lifecycle ---------------------------------------------------------

@@ -11,7 +11,7 @@
 [![CI](https://github.com/Ajayvarmaramineni/BYOC/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajayvarmaramineni/BYOC/actions)
 [![npm](https://img.shields.io/npm/v/@byoc/core?style=flat-square&label=%40byoc%2Fcore&color=CB3837&logo=npm)](https://www.npmjs.com/package/@byoc/core)
 [![PyPI](https://img.shields.io/pypi/v/byoc-storage?style=flat-square&label=byoc-storage&color=3776AB&logo=pypi&logoColor=white)](https://pypi.org/project/byoc-storage/)
-[![Tests](https://img.shields.io/badge/Tests-735%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
+[![Tests](https://img.shields.io/badge/Tests-788%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
 [![Types](https://img.shields.io/badge/Types-tsc%20strict%20%2B%20mypy%20strict-blue?style=flat-square)](#testing-and-verification)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)](LICENSE)
 
@@ -297,7 +297,7 @@ FastAPI / Django / Next.js / Express
 
 **Security**
 - OAuth 2.0 with PKCE (RFC 7636) and CSRF state, using the non-restricted `drive.file` scope so you never enter Google's Restricted Scope assessment
-- Client-side E2EE with AES-256-GCM and PBKDF2-HMAC-SHA256 at 600,000 iterations, with the work factor recorded in the envelope and range-checked before key derivation
+- Framed client-side E2EE with bounded-memory stream APIs, per-frame AES-256-GCM authentication, and V1/V2 read compatibility
 - Encrypted-at-rest token storage, written with owner-only permissions
 - Credential redaction in logs, covering bearer tokens, refresh tokens, and cloud access keys
 - Path traversal rejection and control-character stripping on every virtual path
@@ -312,8 +312,8 @@ FastAPI / Django / Next.js / Express
 ## Testing and verification
 
 ```
-TypeScript   374 tests      tsc --strict
-Python       361 tests      mypy --strict, ruff
+TypeScript   385 tests      tsc --strict
+Python       403 tests      mypy --strict, ruff (live MinIO active)
 Integration   38 tests      live MinIO and WebDAV servers
 Interop       13 tests      both SDKs, same live servers
 ```
@@ -384,6 +384,7 @@ byoc/
 │   └── scripts/                # live Google Drive validation
 ├── spec/fixtures/              # cross-SDK conformance vectors
 ├── docs/                       # setup and integration guides
+├── scripts/                    # repeatable engineering benchmarks
 └── examples/                   # runnable demonstrations
     ├── node-quickstart/        # TypeScript
     └── python-quickstart/      # Python
@@ -413,6 +414,8 @@ Building your own adapter? [`@byoc/provider-sdk`](./packages/provider-sdk) runs 
 | :--- | :--- |
 | [Google Drive OAuth setup](./docs/google-oauth-setup.md) | Cloud console walkthrough, troubleshooting, token persistence |
 | [Conformance fixtures](./spec) | The cross-SDK contract and how to run it |
+| [v0.4 architecture](./docs/design/byoc-v0.4-strategy.md) | Research-backed path from adapter SDK to portable data control plane |
+| [Streaming and E2EE design](./docs/design/streaming-and-chunked-e2ee.md) | V3 wire format, security model, provider constraints and sequencing |
 | [Python SDK](./python) | Install, async client, FastAPI and Celery notes |
 | [Changelog](./CHANGELOG.md) | Release history and known limitations |
 | [Contributing](./CONTRIBUTING.md) | Development setup for both SDKs, and the pull request process |

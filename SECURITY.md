@@ -61,14 +61,62 @@ the storage operator never sees plaintext.
 - The iteration count is read from untrusted storage and consumed before the GCM
   tag can authenticate it, so it is range-checked to 10,000..2,000,000 before
   any key derivation runs
-- The magic header, iteration count, and salt are bound as GCM additional
-  authenticated data, so the envelope header cannot be edited undetected
+- New writes use the framed `BYOC_E2EE_V3` envelope. The full header, frame
+  index, and final-frame marker are bound as GCM additional authenticated data,
+  detecting header swaps, frame reordering, modification, and truncation
+- V3 frame size and frame length are range-checked before allocation; empty
+  objects contain one authenticated final frame
 - Envelope layout is pinned by `spec/fixtures/e2ee-envelope.json` and is
   byte-identical across both SDKs
+- V1 and V2 envelopes remain readable
 
-Payloads are buffered in memory, so E2EE does not currently compose with
-resumable streaming uploads. The wrapper reports `resumableUploads: false`
-rather than failing at upload time.
+Both SDKs encrypt uploads incrementally. Streaming transport has landed for
+some adapters and not others, and the table below says exactly which.
+
+**A stream of unknown length is sent as a multipart upload.** S3 answers
+`411 Length Required` to a chunked `PUT`, so an unbounded body cannot go in one
+request. Splitting it into parts is what makes the transfer possible, and it
+also improves what the signature covers: **each part is fully known when it is
+signed, so every part signs its real SHA-256 payload hash.** Streaming does not
+weaken request signing on this path.
+
+`UNSIGNED-PAYLOAD` is still used in two narrower places, and only there:
+
+- a single streamed `PUT` where the caller supplied `contentLength`, so no
+  multipart upload is opened
+- presigned URLs, where the body does not exist when the URL is signed
+
+In both cases TLS protects the body in transit and, for encrypted objects, V3's
+per-frame tags authenticate the plaintext independently of the transport.
+
+A one-shot stream is consumed as it is sent, so a failed streamed upload is not
+retried automatically -- there would be nothing left to resend. A failed
+multipart upload is aborted so its parts stop accruing storage charges.
+
+WebDAV needs none of this. An RFC 4918 server accepts chunked
+transfer-encoding, so the body streams in a single `PUT` with no part
+accounting, and Basic credentials still authenticate the request.
+
+Measured peak memory, holding one part or chunk at a time:
+
+```
+Python S3 streamed      100 MB -> 57.9 MB     Python S3 buffered  400 MB -> 446.2 MB
+                        400 MB -> 56.7 MB
+                        800 MB -> 57.0 MB
+Python WebDAV streamed  200 MB -> 48.2 MB
+```
+
+Where streaming stands, per adapter:
+
+| Adapter | TypeScript | Python |
+| :--- | :--- | :--- |
+| S3-compatible | streams (multipart) | streams (multipart) |
+| WebDAV | streams (chunked) | streams (chunked) |
+| Google Drive | **buffers** | **buffers** |
+| Local, in-memory | streams | streams |
+
+**Do not claim end-to-end bounded memory for the adapters marked buffers.**
+Python's migration engine also still reads each file fully before writing it.
 
 ### Credential storage
 

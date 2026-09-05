@@ -94,6 +94,8 @@ class MemoryProvider:
             versioning=False,
             quota=True,
             server_side_copy=True,
+            # Nothing is served over HTTP.
+            direct_upload=False,
         )
 
     # -- lifecycle ---------------------------------------------------------

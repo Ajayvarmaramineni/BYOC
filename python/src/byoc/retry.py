@@ -28,7 +28,7 @@ def backoff_delay(
     """
     capped = min(max_delay, base_delay * (2 ** (attempt - 1)))
     # Jitter only; not security-sensitive randomness.
-    return random.uniform(0, capped)
+    return random.uniform(0, capped)  # nosec B311
 
 
 async def with_retry(

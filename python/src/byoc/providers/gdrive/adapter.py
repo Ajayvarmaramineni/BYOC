@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
 import httpx
@@ -16,6 +17,8 @@ from ...types import (
     StorageObject,
     StorageOutput,
     StorageQuota,
+    UploadGrant,
+    UploadGrantOptions,
     UploadOptions,
 )
 from ._http import RESUMABLE_THRESHOLD, DriveHttpClient
@@ -101,6 +104,7 @@ class GoogleDriveProvider:
             versioning=True,
             quota=True,
             server_side_copy=True,
+            direct_upload=True,
         )
 
     async def connect(self) -> None:
@@ -231,6 +235,58 @@ class GoogleDriveProvider:
             provider=PROVIDER_ID,
             provider_id=folder_id,
             type="folder",
+        )
+
+    async def create_upload_grant(
+        self, path: str, options: UploadGrantOptions | None = None
+    ) -> UploadGrant:
+        """Open a resumable session and hand back its URI as an upload grant.
+
+        Unlike S3's signed URL this is not a signature over a path -- Drive has
+        already created the pending file, and the session URI is the only way
+        to write to it. Two consequences worth knowing:
+
+        - ``size_bytes`` is required. Drive wants ``X-Upload-Content-Length``
+          up front, and a session opened with the wrong total rejects the
+          final chunk.
+        - Sessions last about a week, far longer than a signed URL, so this
+          still honours ``expires_in_seconds`` and reports the earlier of the two.
+        """
+        resolved = options or UploadGrantOptions()
+        normalized = normalize_virtual_path(path)
+
+        if resolved.size_bytes is None:
+            raise InvalidInputError(
+                "Google Drive needs the total size before opening a resumable session. "
+                "Pass size_bytes (file.size in the browser) when creating the grant.",
+                provider=PROVIDER_ID,
+            )
+
+        parent_id = await self.resolver.resolve_parent_folder_id(normalized, create=True)
+        mime_type = resolved.mime_type or "application/octet-stream"
+
+        session_uri = await self.http.start_resumable_upload(
+            {
+                "name": get_basename(normalized),
+                "parents": [parent_id],
+                "mimeType": mime_type,
+                "appProperties": {"byocVirtualPath": normalized},
+            },
+            mime_type,
+        )
+
+        return UploadGrant(
+            provider=PROVIDER_ID,
+            path=normalized,
+            url=session_uri,
+            method="PUT",
+            headers={},
+            protocol="resumable",
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(seconds=resolved.expires_in_seconds),
+            # Drive requires every chunk but the last to be a multiple of 256 KiB.
+            chunk_size=8 * 1024 * 1024,
+            max_bytes=resolved.size_bytes,
         )
 
     async def copy(self, source: str, destination: str) -> None:

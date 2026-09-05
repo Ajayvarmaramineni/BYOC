@@ -81,7 +81,9 @@ export class LocalFileSystemProvider implements BYOCProvider {
       resumableUploads: false,
       versioning: false,
       quota: true,
-      serverSideCopy: true
+      serverSideCopy: true,
+      // A local path is not reachable by a browser.
+      directUpload: false
     };
   }
 

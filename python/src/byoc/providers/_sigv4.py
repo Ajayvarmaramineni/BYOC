@@ -23,7 +23,7 @@ UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD"
 _WHITESPACE_RUN = re.compile(r"\s+")
 
 
-def _sha256_hex(data: bytes) -> str:
+def _sha256_hex(data: bytes | memoryview) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
@@ -80,8 +80,9 @@ def sign_s3_request(
     url: str,
     service: str = "s3",
     headers: dict[str, str] | None = None,
-    body: bytes | None = None,
+    body: bytes | memoryview | None = None,
     moment: datetime | None = None,
+    unsigned_payload: bool = False,
 ) -> dict[str, str]:
     """Sign a request and return the headers to send, including ``Authorization``.
 
@@ -96,8 +97,16 @@ def sign_s3_request(
     canonical_uri = parts.path or "/"
     canonical_query = build_canonical_query_string(parts.query)
 
-    # An empty body signs as the sha256 of the empty string, not UNSIGNED-PAYLOAD.
-    body_hash = _sha256_hex(body) if body else EMPTY_BODY_SHA256
+    # Streaming bodies cannot be hashed without buffering them, which is the
+    # whole point of streaming, so they sign as UNSIGNED-PAYLOAD instead. The
+    # request is still authenticated and TLS still protects the body in
+    # transit; only the body's integrity is no longer covered by the signature.
+    # Buffered uploads keep signing the real hash, so nothing regresses.
+    if unsigned_payload:
+        body_hash = UNSIGNED_PAYLOAD
+    else:
+        # An empty body signs as the sha256 of the empty string, not UNSIGNED-PAYLOAD.
+        body_hash = _sha256_hex(body) if body else EMPTY_BODY_SHA256
 
     signed = {
         "host": parts.netloc,
