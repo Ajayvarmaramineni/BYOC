@@ -1,0 +1,95 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>BYOC — the bytes never touch the server</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 48px 40px;
+    font: 15px/1.6 ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    background: #0d1117; color: #e6edf3;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+  p.sub { margin: 0 0 32px; color: #8b949e; }
+  .drop {
+    border: 1px dashed #30363d; border-radius: 10px; padding: 40px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .drop:hover, .drop.over { border-color: #58a6ff; background: #0f1620; }
+  .bar { height: 6px; background: #21262d; border-radius: 999px; margin: 28px 0 10px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: #3fb950; transition: width .12s linear; }
+  .row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; color: #8b949e; }
+  .pct { color: #e6edf3; font-weight: 600; }
+  .done { margin-top: 26px; padding: 14px 16px; border-radius: 8px;
+          background: #0f2417; border: 1px solid #1f6f3f; display: none; }
+  .done strong { color: #3fb950; }
+  code { color: #79c0ff; }
+</style>
+
+<h1>Upload to your own cloud</h1>
+<p class="sub">This page talks to storage directly. The server only signs a permission.</p>
+
+<div class="drop" id="drop">
+  <input type="file" id="file" hidden />
+  Drop a large file here, or click to choose one
+</div>
+
+<div class="bar"><div class="fill" id="fill"></div></div>
+<div class="row">
+  <span id="status">waiting for a file</span>
+  <span class="pct" id="pct">0%</span>
+</div>
+
+<div class="done" id="done"></div>
+
+<script type="module">
+  // Served from the CDN so the demo needs no bundler. This is the same
+  // published package an application would install from npm.
+  import { uploadWithGrant, reviveGrant } from "https://cdn.jsdelivr.net/npm/@byoc/browser@0.4/+esm";
+
+  const drop = document.getElementById("drop");
+  const input = document.getElementById("file");
+  const fill = document.getElementById("fill");
+  const pct = document.getElementById("pct");
+  const status = document.getElementById("status");
+  const done = document.getElementById("done");
+
+  drop.onclick = () => input.click();
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); send(e.dataTransfer.files[0]); };
+  input.onchange = () => send(input.files[0]);
+
+  const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+
+  async function send(file) {
+    if (!file) return;
+    done.style.display = "none";
+    status.textContent = `asking the server for permission…`;
+
+    // The only thing the server is asked for: a short-lived, path-scoped grant.
+    const grant = reviveGrant(
+      await fetch(`/api/grant?name=${encodeURIComponent(file.name)}`).then((r) => r.json())
+    );
+
+    status.textContent = `uploading ${mb(file.size)} straight to storage`;
+    const started = performance.now();
+
+    await uploadWithGrant(grant, file, {
+      onProgress: (p) => {
+        fill.style.width = p.percentage + "%";
+        pct.textContent = p.percentage.toFixed(0) + "%";
+      }
+    });
+
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+
+    // Prove it arrived, rather than trusting a progress bar that reached 100%.
+    const landed = await fetch(`/api/verify?name=${encodeURIComponent(file.name)}`).then((r) => r.json());
+
+    status.textContent = `done in ${seconds}s`;
+    done.style.display = "block";
+    done.innerHTML =
+      `<strong>${mb(landed.size)} in your bucket</strong> at <code>${landed.path}</code><br>` +
+      `Bytes through the application server: <strong>0</strong>`;
+  }
+</script>
