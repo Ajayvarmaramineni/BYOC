@@ -19,6 +19,7 @@ import pytest
 
 from byoc.errors import (
     AuthRequiredError,
+    InvalidInputError,
     ObjectNotFoundError,
     QuotaExceededError,
     RateLimitedError,
@@ -35,6 +36,7 @@ from byoc.providers.gdrive import (
     TokenSession,
     escape_drive_query_value,
 )
+from byoc.types import UploadGrantOptions
 
 FOLDER_MIME = "application/vnd.google-apps.folder"
 
@@ -374,6 +376,35 @@ def test_manifest_and_capabilities() -> None:
     assert caps.folders is True
     assert caps.quota is True
     assert caps.resumable_uploads is True
+
+
+@pytest.mark.parametrize("expires_in_seconds", [0, -1, 604_801, True])
+async def test_upload_grant_rejects_invalid_lifetime_before_remote_work(
+    expires_in_seconds: int,
+) -> None:
+    drive = FakeDrive()
+    provider = _provider(drive)
+    files_before = set(drive.files)
+
+    with pytest.raises(InvalidInputError, match="expires_in_seconds"):
+        await provider.create_upload_grant(
+            "report.pdf",
+            UploadGrantOptions(size_bytes=1, expires_in_seconds=expires_in_seconds),
+        )
+    assert set(drive.files) == files_before
+
+
+@pytest.mark.parametrize("size_bytes", [-1, True])
+async def test_upload_grant_rejects_invalid_size_before_remote_work(size_bytes: int) -> None:
+    drive = FakeDrive()
+    provider = _provider(drive)
+    files_before = set(drive.files)
+
+    with pytest.raises(InvalidInputError, match="size_bytes"):
+        await provider.create_upload_grant(
+            "report.pdf", UploadGrantOptions(size_bytes=size_bytes)
+        )
+    assert set(drive.files) == files_before
 
 
 async def test_upload_writes_the_shared_virtual_path_property() -> None:

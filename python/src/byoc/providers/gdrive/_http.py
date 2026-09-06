@@ -377,6 +377,26 @@ class DriveHttpClient:
         total = len(payload)
         offset = 0
 
+        if total == 0:
+            # `while offset < total` never runs for an empty payload, so without
+            # this the session is opened and then abandoned: zero requests are
+            # sent and the caller sees "ended without a completion response"
+            # rather than an empty file. Drive finalises an empty object with a
+            # byte range of `*`. TypeScript already guarded this; Python did not.
+            response = await self._http().put(
+                upload_url,
+                headers={"Content-Length": "0", "Content-Range": f"bytes */{total}"},
+                content=b"",
+            )
+            if response.is_error:
+                raise self.map_error(response)
+            if on_progress:
+                on_progress(
+                    UploadProgress(bytes_uploaded=0, total_bytes=0, percentage=100.0)
+                )
+            empty: dict[str, Any] = response.json()
+            return empty
+
         while offset < total:
             end = min(offset + aligned, total)
             chunk = payload[offset:end]

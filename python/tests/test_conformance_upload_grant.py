@@ -15,7 +15,7 @@ import pytest
 from conftest import load_fixture
 
 from byoc import AsyncBYOC, MemoryProvider, UploadGrant, UploadGrantOptions
-from byoc.errors import CapabilityUnsupportedError
+from byoc.errors import CapabilityUnsupportedError, InvalidInputError
 from byoc.providers.s3 import S3CompatibleProvider
 
 FIXTURE = load_fixture("upload-grant.json")
@@ -124,6 +124,18 @@ async def test_expiry_is_in_the_future_and_bounded() -> None:
     assert grant.expires_at is not None
     assert grant.expires_at > before
     assert grant.expires_at <= before + timedelta(seconds=301)
+
+
+@pytest.mark.parametrize("expires_in_seconds", [0, -1, 604_801, True])
+async def test_s3_rejects_invalid_upload_grant_lifetimes(
+    expires_in_seconds: int,
+) -> None:
+    client = AsyncBYOC(provider=make_s3())
+
+    with pytest.raises(InvalidInputError, match="expires_in_seconds"):
+        await client.create_upload_grant(
+            "a.jpg", UploadGrantOptions(expires_in_seconds=expires_in_seconds)
+        )
 
 
 async def test_a_provider_without_the_capability_refuses() -> None:

@@ -26,6 +26,7 @@ import httpx
 import pytest
 
 from byoc.encryption import E2EECrypto
+from byoc.providers._sigv4 import sign_s3_request
 from byoc.providers.s3 import S3CompatibleProvider
 from byoc.providers.webdav import WebDAVProvider
 
@@ -78,6 +79,25 @@ requires_node = pytest.mark.skipif(
     not (_node_available() and _ts_built()),
     reason="Interop needs node and a built TypeScript dist/",
 )
+
+
+@pytest.fixture(scope="module")
+def s3_bucket() -> None:
+    """Create the shared bucket so interop tests do not depend on suite order."""
+    url = f"{S3_ENDPOINT}/{S3_BUCKET}"
+    headers = sign_s3_request(
+        access_key_id=S3_KEY,
+        secret_access_key=S3_SECRET,
+        region=S3_REGION,
+        method="PUT",
+        url=url,
+    )
+    response = httpx.put(url, headers=headers, timeout=10.0)
+    already_exists = any(
+        marker in response.text for marker in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists")
+    )
+    if response.is_error and not already_exists:
+        pytest.fail(f"Could not create interop bucket: HTTP {response.status_code} {response.text}")
 
 
 @pytest.fixture(scope="module")
@@ -165,7 +185,7 @@ def py_dav(endpoint: str, root_folder: str) -> WebDAVProvider:
 
 
 @requires_interop
-async def test_s3_typescript_writes_python_reads() -> None:
+async def test_s3_typescript_writes_python_reads(s3_bucket: None) -> None:
     root = f"interop-{uuid.uuid4().hex[:8]}"
     files = {name: f"content of {name}" for name in AWKWARD_FILENAMES}
 
@@ -180,7 +200,7 @@ async def test_s3_typescript_writes_python_reads() -> None:
 
 
 @requires_interop
-async def test_s3_python_writes_typescript_reads() -> None:
+async def test_s3_python_writes_typescript_reads(s3_bucket: None) -> None:
     root = f"interop-{uuid.uuid4().hex[:8]}"
     files = {name: f"content of {name}" for name in AWKWARD_FILENAMES}
 
@@ -196,7 +216,7 @@ async def test_s3_python_writes_typescript_reads() -> None:
 
 
 @requires_interop
-async def test_s3_listing_agrees_across_sdks() -> None:
+async def test_s3_listing_agrees_across_sdks(s3_bucket: None) -> None:
     """Both SDKs must report the same virtual paths, names, and types."""
     root = f"interop-{uuid.uuid4().hex[:8]}"
     files = {"docs/a.txt": "a", "docs/b.txt": "bb", "docs/nested/c.txt": "ccc"}
@@ -218,6 +238,21 @@ async def test_s3_listing_agrees_across_sdks() -> None:
 
     assert [o["path"] for o in py_objects] == [o["path"] for o in ts_listing]
     assert [o["type"] for o in py_objects] == [o["type"] for o in ts_listing]
+
+
+@requires_interop
+def test_s3_typescript_encrypted_unknown_length_stream_roundtrip(s3_bucket: None) -> None:
+    """The wrapper and multipart uploader must compose against a real S3 server."""
+    total_bytes = 9 * 1024 * 1024 + 17
+    result = run_ts(
+        "encryptedStreamS3",
+        {"root": f"interop-{uuid.uuid4().hex[:8]}", "totalBytes": total_bytes},
+    )
+
+    assert result["downloadedBytes"] == total_bytes
+    assert result["reportedPlaintextBytes"] is None
+    assert result["storedBytes"] > total_bytes
+    assert result["actualSha256"] == result["expectedSha256"]
 
 
 # -- WebDAV ------------------------------------------------------------------

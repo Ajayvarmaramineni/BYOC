@@ -408,19 +408,33 @@ class WebDAVProvider:
         url = self._url(remote)
 
         async def fetch() -> httpx.Response:
-            response = await self._http().get(url, headers=self._headers())
+            # stream=True leaves the body unread so a large object never has to
+            # fit in memory; the response stays open until the caller consumes
+            # it. This previously read response.content up front and yielded it
+            # as a single chunk, so stream() buffered exactly what it promised
+            # not to.
+            request = self._http().build_request("GET", url, headers=self._headers())
+            response = await self._http().send(request, stream=True)
             if response.is_error:
+                await response.aread()
+                await response.aclose()
                 raise self._map_error(response)
             return response
 
         response = await with_retry(fetch)
-        body = response.content
 
         async def stream() -> AsyncIterator[bytes]:
-            yield body
+            try:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+            finally:
+                await response.aclose()
 
         async def read() -> bytes:
-            return body
+            try:
+                return await response.aread()
+            finally:
+                await response.aclose()
 
         return StorageOutput(
             metadata=self._object_from_response(remote, response), stream=stream, read=read
