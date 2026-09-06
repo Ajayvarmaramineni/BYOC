@@ -11,7 +11,7 @@
 [![CI](https://github.com/Ajayvarmaramineni/BYOC/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajayvarmaramineni/BYOC/actions)
 [![npm](https://img.shields.io/npm/v/@byoc/core?style=flat-square&label=%40byoc%2Fcore&color=CB3837&logo=npm)](https://www.npmjs.com/package/@byoc/core)
 [![PyPI](https://img.shields.io/pypi/v/byoc-storage?style=flat-square&label=byoc-storage&color=3776AB&logo=pypi&logoColor=white)](https://pypi.org/project/byoc-storage/)
-[![Tests](https://img.shields.io/badge/Tests-788%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
+[![Tests](https://img.shields.io/badge/Tests-822%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
 [![Types](https://img.shields.io/badge/Types-tsc%20strict%20%2B%20mypy%20strict-blue?style=flat-square)](#testing-and-verification)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)](LICENSE)
 
@@ -312,9 +312,9 @@ FastAPI / Django / Next.js / Express
 ## Testing and verification
 
 ```
-TypeScript   385 tests      tsc --strict
-Python       403 tests      mypy --strict, ruff (live MinIO active)
-Integration   38 tests      live MinIO and WebDAV servers
+TypeScript   416 tests      tsc --strict
+Python       406 tests      mypy --strict, ruff
+Integration   42 tests      live MinIO and WebDAV servers
 Interop       13 tests      both SDKs, same live servers
 ```
 
@@ -414,7 +414,7 @@ Building your own adapter? [`@byoc/provider-sdk`](./packages/provider-sdk) runs 
 | :--- | :--- |
 | [Google Drive OAuth setup](./docs/google-oauth-setup.md) | Cloud console walkthrough, troubleshooting, token persistence |
 | [Conformance fixtures](./spec) | The cross-SDK contract and how to run it |
-| [v0.4 architecture](./docs/design/byoc-v0.4-strategy.md) | Research-backed path from adapter SDK to portable data control plane |
+| [Internal roadmap](./docs/design/roadmap-internal.md) | Where BYOC is heading over several releases, and what we deliberately will not build |
 | [Streaming and E2EE design](./docs/design/streaming-and-chunked-e2ee.md) | V3 wire format, security model, provider constraints and sequencing |
 | [Python SDK](./python) | Install, async client, FastAPI and Celery notes |
 | [Changelog](./CHANGELOG.md) | Release history and known limitations |
