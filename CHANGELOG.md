@@ -8,45 +8,87 @@ version is below `1.0.0`, the public API may change between minor releases.
 
 ---
 
-## [Unreleased]
+## [0.4.0] - 2026-09-06
+
+The release where a file no longer has to fit in memory, and where the bytes no
+longer have to pass through your server at all.
+
+### Highlights
+
+**Every adapter streams, in both SDKs.** S3, WebDAV, Google Drive, local and
+in-memory all accept an async iterator and transfer it without buffering the
+object. An 800 MB upload holds a flat ~57 MB of resident memory instead of
+850 MB, and a file larger than RAM is now possible rather than impossible.
+Migration pipes source to target directly, so moving objects between providers
+is bounded by the chunk size rather than by the largest file.
+
+**Direct browser upload.** `createUploadGrant()` mints a capability that is safe
+to hand to an untrusted client, and [`@byoc/browser`](https://www.npmjs.com/package/@byoc/browser)
+consumes it. The bytes go from the user's machine to the user's own cloud; your
+server sees a path and a size and never any content. S3 signs a PUT covering
+only `host` and `UNSIGNED-PAYLOAD`; Google Drive opens a resumable session whose
+URI is itself the capability and needs no `Authorization` header, keeping your
+OAuth token server-side.
+
+**Framed `BYOC_E2EE_V3` encryption.** AES-GCM authenticates one message with one
+tag, so encrypting a file used to mean holding all of it. V3 splits the payload
+into independently authenticated frames, binding the header, frame index and a
+final-frame marker as additional authenticated data so reordering, truncation
+and header swaps are all detected. V1 and V2 envelopes remain readable.
 
 ### Added
 
-- `BYOC_E2EE_V3`: independently authenticated AES-256-GCM frames for
-  bounded-memory encryption and decryption in TypeScript and Python
-- `encryptStream()` / `decryptStream()` and Python
-  `encrypt_stream()` / `decrypt_stream()`
-- Exact V3 envelope sizing via `encryptedSize()` and Python `encrypted_size()`
+- `@byoc/browser`: `uploadWithGrant()` with progress, retry, abort and resumable chunking
+- `createUploadGrant()` on both clients, gated on a new `directUpload` capability
+- `encryptStream` / `decryptStream` in both SDKs
+- Streaming upload for S3 (multipart), WebDAV (chunked) and Google Drive (resumable)
+- `spec/fixtures/upload-grant.json`, pinning the grant wire format across SDKs
+- Exact V3 envelope sizing via `encryptedSize()` / `encrypted_size()`
+- `UploadOptions.contentLength` for exact-length streaming requests; the
+  encrypted wrapper converts plaintext length to the V3 envelope length
 - A deterministic V3 cross-SDK fixture plus hostile chunk-boundary, truncation,
-  reorder, oversized-frame, empty-object, and header-tampering tests
-- A research-backed v0.4 product architecture in
-  [`docs/design/byoc-v0.4-strategy.md`](./docs/design/byoc-v0.4-strategy.md)
+  reorder, oversized-frame, empty-object and header-tampering tests
 - A repeatable bounded-memory benchmark via `npm run benchmark:streaming`
-- `UploadOptions.contentLength` for exact-length streaming requests; the encrypted
-  wrapper converts plaintext length to the V3 envelope length
-
-### Changed
-
-- TypeScript `EncryptedStorageWrapper` now streams true stream inputs, keeps
-  buffered inputs payload-signed and retryable, reports plaintext sizes, and
-  preserves the underlying provider's resumable capability
-- Pure cryptography interop tests no longer require a running S3 server
+- Static security scanning in CI: `bandit` and `pip-audit`
 
 ### Fixed
 
-- Streamed S3 PUT requests now sign `UNSIGNED-PAYLOAD` instead of the SHA-256
-  of an empty body
-- S3 rejects unknown-length streams before sending a request that portable
-  S3-compatible servers such as MinIO refuse with HTTP 411
-- One-shot S3 and WebDAV request bodies are not retried after their streams have
-  already been consumed
-- Python S3 and WebDAV responses now use `defusedxml` for provider-controlled XML;
-  Bandit and `pip-audit` run in CI
+- **S3 rejected unknown-length streams.** A chunked `PUT` gets `411 Length Required`, so such a body now goes up as a multipart upload. Each part is fully known when signed, so every part signs its real SHA-256 rather than `UNSIGNED-PAYLOAD` -- streaming no longer weakens request signing on that path.
+- **Provider-returned XML could expand DTD entities.** `ListObjectsV2` and `PROPFIND` responses are attacker-influenceable and parsed on every list call; both parsers now refuse entity expansion, with tests asserting the refusal rather than trusting a library default.
+- **A `null` optional field in a grant broke every upload from a Python backend to a JavaScript frontend**, because `size > null` is true in JavaScript. Absent optional fields are now omitted rather than serialized as null.
+- **A missing grant expiry was treated as "never expires."** It now fails closed.
+- **The Python client dropped a provider defining `__len__` while it was empty**, having registered by truthiness rather than `is not None`.
+- **A token-storage test asserted a two-byte needle was absent from random ciphertext**, which collides by chance and failed roughly one push in a hundred while looking like a Python-version bug.
 
-### Compatibility
+### Changed
 
-- New encryption writes use V3. Existing V1 and V2 objects remain readable in
-  both SDKs.
+- `EncryptedStorageWrapper` streams true stream inputs, keeps buffered inputs
+  payload-signed and retryable, reports plaintext sizes, and preserves the
+  underlying provider's resumable capability
+- Pure cryptography interop tests no longer require a running S3 server
+- All packages and adapter manifests report `0.4.0`
+- `SECURITY.md` records where streaming has landed per adapter and the measured memory figures
+
+### Verification
+
+Google Drive is validated against a real account by
+`python/scripts/validate_gdrive_live.py`, now including the streaming path:
+20/20 checks passing, among them a stream of exactly one chunk, which is the
+case the resumable lookahead exists for. Both SDKs stream the same 100 MB file
+to identical SHA-256.
+
+```
+TypeScript   416 tests
+Python       435 tests, plus 42 integration and 13 interop
+```
+
+### Known limitations
+
+- **`@byoc/connect` and the metadata index are not in this release.** Both need design decisions -- token storage location, and what happens when a user edits a file directly in their cloud -- that are better made deliberately than quickly.
+- **Two instances of the same provider type still cannot be registered on one client**, since the registry is keyed by manifest id.
+- **`move` and `copy` of a filename containing `?` fail against wsgidav.** BYOC sends a correctly encoded `Destination`; wsgidav decodes it and re-parses as a URL, truncating at the `?`. Confirmed with `curl` against the server directly.
+
+---
 
 ## [0.3.0] - 2026-08-27
 
@@ -195,6 +237,7 @@ Initial release: the TypeScript storage abstraction, with Google Drive, S3-compa
 
 ---
 
+[0.4.0]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Ajayvarmaramineni/BYOC/releases/tag/v0.2.0
