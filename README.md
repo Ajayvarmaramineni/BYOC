@@ -4,9 +4,9 @@
 
 # BYOC: Bring Your Own Cloud
 
-### One API. The user's own cloud.
+### One API for storage your users already own.
 
-<p>One storage API for Google Drive, Nextcloud, and S3-compatible clouds, so files live in accounts the end user already owns.</p>
+<p>Google Drive, S3 and R2, Nextcloud, or a local disk. The bytes go from your user's browser straight to your user's cloud &mdash; your server never touches them.</p>
 
 [![CI](https://github.com/Ajayvarmaramineni/BYOC/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajayvarmaramineni/BYOC/actions)
 [![npm](https://img.shields.io/npm/v/@byoc/core?style=flat-square&label=%40byoc%2Fcore&color=CB3837&logo=npm)](https://www.npmjs.com/package/@byoc/core)
@@ -21,9 +21,27 @@
 
 ## What is BYOC?
 
-Every application that handles user files eventually pays the same tax: a storage bucket that grows forever, an egress bill that scales with success, and a compliance conversation about data nobody wanted to hold.
+Every application that handles user files pays the same three costs: a storage bill that grows with your user count rather than your revenue, legal exposure for data you never wanted, and a trust problem now that users ask whether their files train someone's model.
 
-BYOC removes it. Rather than the application hosting every file, it reads and writes storage **the end user already owns**: a personal Google Drive, a company Nextcloud, an organization's own S3 bucket. One API, any supported backend, in TypeScript or Python.
+BYOC's answer to all three is the same: **don't hold the data.** Read and write storage the end user *already owns* — their Google Drive, their company Nextcloud, their own S3 bucket. One API, any supported backend, TypeScript or Python.
+
+The word doing the work is **already**. This asks nothing of your users beyond an account they have: no new protocol, no new server, no migration.
+
+### Your server issues a permission, not a pipe
+
+```text
+   WITHOUT BYOC                          WITH BYOC
+
+   browser                               browser
+      │                                     │
+      ▼                                     │  short-lived grant
+   your server   ← bandwidth                ▼
+      │          ← liability            user's cloud
+      ▼          ← storage bill
+   your S3                              your server: metadata only
+```
+
+Your server signs a short-lived, path-scoped credential and records a pointer. It never sees a byte of content. That is not a diagram of an intention — it is what [`@byoc/browser`](./packages/browser) does today, and the S3 signature covers the object key, so a client holding a grant for one path cannot redirect it to another.
 
 ```text
                         YOUR APPLICATION
@@ -56,6 +74,8 @@ BYOC ships two peer SDKs with the same capabilities. Pick your language, or use 
 
 ```bash
 npm install @byoc/core
+
+npm install @byoc/browser
 
 npm install @byoc/local
 npm install @byoc/memory
@@ -217,6 +237,112 @@ The Python SDK is idiomatic Python, not a transliteration: `snake_case`, excepti
 
 ---
 
+## Upload straight to the user's cloud
+
+Your server mints a grant. The browser uses it. No file bytes cross your
+infrastructure.
+
+**On your server** — an API route that checks the caller may write there, then
+signs:
+
+```ts
+const grant = await storage.createUploadGrant(`users/${userId}/${filename}`, {
+  expiresInSeconds: 900
+});
+return Response.json(grant);
+```
+
+**In the browser:**
+
+```ts
+import { uploadWithGrant, reviveGrant } from "@byoc/browser";
+
+const grant = reviveGrant(await fetch("/api/upload-grant?...").then(r => r.json()));
+
+await uploadWithGrant(grant, file, {
+  onProgress: p => setPercent(p.percentage)
+});
+```
+
+The grant is plain JSON with no credential of yours in it. Two providers reach
+that shape by different routes: S3 signs a `PUT` covering `UNSIGNED-PAYLOAD` and
+the `host` header only, and Google Drive opens a resumable session whose URI is
+itself the capability and needs no `Authorization` header — so your OAuth token
+stays on your server.
+
+It is a bearer capability, so keep the lifetime short and only issue one after
+checking the caller is allowed to write to that path. The signature covers the
+object key, so a client cannot redirect a grant to a different file.
+
+> Providers report this through the `directUpload` capability. WebDAV returns
+> `false` — it authenticates every request with Basic credentials, so there is
+> no URL a browser can be handed without also handing it the password.
+
+---
+
+## Files larger than memory
+
+Every adapter accepts an async iterator and transfers it without buffering the
+object. Measured against a live server, uploading a file from disk:
+
+```
+                    100 MB file    400 MB file    800 MB file
+streamed              57.9 MB        56.7 MB        57.0 MB
+buffered                  —         446.2 MB           —
+```
+
+Flat, regardless of size. A file larger than available memory went from
+impossible to unremarkable.
+
+```python
+async def chunks():
+    with open("lecture.mp4", "rb") as fh:
+        while block := fh.read(1024 * 1024):
+            yield block
+
+await storage.upload("recordings/lecture.mp4", chunks())
+```
+
+Each provider needs a different mechanism, and BYOC picks the right one: S3
+answers `411 Length Required` to a chunked `PUT`, so an unknown-length body
+becomes a multipart upload; WebDAV takes chunked transfer-encoding directly;
+Google Drive needs a resumable session with a one-chunk lookahead, because it
+accepts `bytes 0-N/*` while the total is unknown but demands the real total on
+the final chunk.
+
+Encryption streams too. `BYOC_E2EE_V3` authenticates independent frames, binding
+the header, frame index and a final-frame marker as additional authenticated
+data, so reordering, truncation and header swaps are all detected — and a large
+file can be encrypted without holding it.
+
+---
+
+## How this differs from what you might compare it to
+
+**vs. an S3 SDK.** S3 puts files in *your* bucket. The bill and the breach are
+yours. BYOC puts them in the user's account, on the user's quota.
+
+**vs. Uppy / Companion.** Uppy is an importer: a user picks a file from their
+Drive and it is copied into your storage. After the import you hold the file and
+all three costs apply. With BYOC it never leaves.
+
+**vs. Solid / remoteStorage.** Same goal, opposite method. They define a new
+protocol and need new servers and new user habits. BYOC uses accounts users
+already have.
+
+**vs. OpenDAL / rclone.** Both are excellent tools you reach for. BYOC is a
+dependency your application ships with, and it makes provider differences
+explicit rather than flattening them — you feature-detect `directUpload` instead
+of discovering at runtime that a provider cannot do it.
+
+> **"Isn't this just presigned URLs?"**
+>
+> For S3, yes — about ten lines. Now do Google Drive's resumable sessions,
+> progress and resume in the browser, and swap providers without touching your
+> code.
+
+---
+
 ## Supported providers
 
 | Provider | Ownership model | TypeScript | Python | Status |
@@ -226,11 +352,24 @@ The Python SDK is idiomatic Python, not a transliteration: `snake_case`, excepti
 | **Google Drive** | Personal cloud | [`@byoc/google-drive`](./packages/google-drive) | `byoc.providers.gdrive` | Live-verified |
 | **Cloudflare R2 / AWS S3 / MinIO / Wasabi** | Developer cloud | [`@byoc/s3-compatible`](./packages/s3-compatible) | `byoc.providers.s3` | Live-verified |
 | **Nextcloud / ownCloud / WebDAV / Synology** | Self-hosted | [`@byoc/webdav`](./packages/webdav) | `byoc.providers.webdav` | Live-verified |
+| **Browser direct upload** | Client-side transfer | [`@byoc/browser`](./packages/browser) | n/a — browser only | Live-verified |
 | **Provider Certification SDK** | Compliance harness | [`@byoc/provider-sdk`](./packages/provider-sdk) | planned | Stable |
 | Microsoft OneDrive | Personal cloud | planned | planned | Planned |
 | Dropbox | Personal cloud | planned | planned | Planned |
 
 *Live-verified* means the adapter is exercised against a real server, not a mock. See [Testing and verification](#testing-and-verification).
+
+Not every provider can do everything, and BYOC says so rather than failing at the call site:
+
+| | Streams | Direct browser upload | Real folders | Server-side copy |
+| :--- | :---: | :---: | :---: | :---: |
+| Google Drive | yes | yes | yes | yes |
+| S3 / R2 / MinIO | yes | yes | no | yes |
+| Nextcloud / WebDAV | yes | **no** | yes | yes |
+| Local filesystem | yes | **no** | yes | yes |
+| In-memory | yes | **no** | no | yes |
+
+WebDAV cannot issue a browser grant because it authenticates every request with Basic credentials; local and in-memory are not reachable over HTTP. Feature-detect with `hasCapability("directUpload")`.
 
 ---
 
