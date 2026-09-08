@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/byoc-storage?style=flat-square&color=3776AB&logo=pypi&logoColor=white)](https://pypi.org/project/byoc-storage/)
 [![Python](https://img.shields.io/pypi/pyversions/byoc-storage?style=flat-square&color=3776AB)](https://pypi.org/project/byoc-storage/)
-[![Tests](https://img.shields.io/badge/Tests-406%20Passed-brightgreen?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC)
+[![Tests](https://img.shields.io/badge/Tests-452%20Passed-brightgreen?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC)
 [![Types](https://img.shields.io/badge/mypy-strict-blue?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)](https://github.com/Ajayvarmaramineni/BYOC/blob/main/LICENSE)
 

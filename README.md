@@ -11,9 +11,15 @@
 [![CI](https://github.com/Ajayvarmaramineni/BYOC/actions/workflows/ci.yml/badge.svg)](https://github.com/Ajayvarmaramineni/BYOC/actions)
 [![npm](https://img.shields.io/npm/v/@byoc/core?style=flat-square&label=%40byoc%2Fcore&color=CB3837&logo=npm)](https://www.npmjs.com/package/@byoc/core)
 [![PyPI](https://img.shields.io/pypi/v/byoc-storage?style=flat-square&label=byoc-storage&color=3776AB&logo=pypi&logoColor=white)](https://pypi.org/project/byoc-storage/)
-[![Tests](https://img.shields.io/badge/Tests-822%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
+[![Tests](https://img.shields.io/badge/Tests-868%20Passed-brightgreen?style=flat-square)](#testing-and-verification)
 [![Types](https://img.shields.io/badge/Types-tsc%20strict%20%2B%20mypy%20strict-blue?style=flat-square)](#testing-and-verification)
 [![License](https://img.shields.io/badge/License-Apache%202.0-orange?style=flat-square)](LICENSE)
+
+<br />
+
+<img src="./docs/assets/direct-upload.gif" alt="A 5.9 GB file uploads from the browser to the user's own cloud while the application server's log records zero bytes" width="100%" />
+
+<p><em>A 5.9&nbsp;GB file, uploaded in 7.9 seconds. The application server's log &mdash; on the right &mdash;<br />records two requests and <strong>zero bytes</strong>. <a href="./examples/direct-upload-demo">Run it yourself</a>.</em></p>
 
 </div>
 
@@ -278,6 +284,10 @@ object key, so a client cannot redirect a grant to a different file.
 > `false` — it authenticates every request with Basic credentials, so there is
 > no URL a browser can be handed without also handing it the password.
 
+**[Run it yourself](./examples/direct-upload-demo)** — a page, a 90-line server,
+and a request log that stays at zero bytes while the file uploads. Points at a
+local MinIO by default, so it needs no cloud account.
+
 ---
 
 ## Files larger than memory
@@ -309,6 +319,11 @@ becomes a multipart upload; WebDAV takes chunked transfer-encoding directly;
 Google Drive needs a resumable session with a one-chunk lookahead, because it
 accepts `bytes 0-N/*` while the total is unknown but demands the real total on
 the final chunk.
+
+Downloads stream as well, so `StorageOutput.stream()` yields chunks rather than
+buffering the object first. That is what makes a migration bounded by the chunk
+size rather than by the largest file in it: a 300 MB transfer between providers
+holds 56 MB, in either direction.
 
 Encryption streams too. `BYOC_E2EE_V3` authenticates independent frames, binding
 the header, frame index and a final-frame marker as additional authenticated
@@ -452,9 +467,9 @@ FastAPI / Django / Next.js / Express
 
 ```
 TypeScript   416 tests      tsc --strict
-Python       406 tests      mypy --strict, ruff
-Integration   42 tests      live MinIO and WebDAV servers
-Interop       13 tests      both SDKs, same live servers
+Python       452 tests      mypy --strict, ruff
+Integration   43 tests      live MinIO and WebDAV servers
+Interop       14 tests      both SDKs, same live servers
 ```
 
 Every adapter is exercised against a real server rather than a mock. Each of the following was a genuine bug caught that way and invisible to mocked tests:
