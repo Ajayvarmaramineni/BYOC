@@ -19,6 +19,7 @@ from ..paths import rfc3986_uri_encode
 ALGORITHM = "AWS4-HMAC-SHA256"
 EMPTY_BODY_SHA256 = hashlib.sha256(b"").hexdigest()
 UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD"
+MAX_PRESIGNED_URL_LIFETIME_SECONDS = 7 * 24 * 60 * 60
 
 _WHITESPACE_RUN = re.compile(r"\s+")
 
@@ -161,6 +162,15 @@ def create_presigned_s3_url(
     Presigned URLs sign ``UNSIGNED-PAYLOAD`` and only the ``host`` header, since
     the body is not known when the URL is created.
     """
+    if (
+        isinstance(expires_in_seconds, bool)
+        or not isinstance(expires_in_seconds, int)
+        or not 1 <= expires_in_seconds <= MAX_PRESIGNED_URL_LIFETIME_SECONDS
+    ):
+        raise ValueError(
+            "expires_in_seconds must be an integer between 1 and "
+            f"{MAX_PRESIGNED_URL_LIFETIME_SECONDS}"
+        )
     now = moment or datetime.now(timezone.utc)
     amz_date = _amz_date(now)
     date_stamp = amz_date[:8]

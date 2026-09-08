@@ -98,3 +98,16 @@ def test_presigned_url_matches_vector(case: dict[str, Any]) -> None:
         moment=_MOMENT,
     )
     assert url == case["expected_url"]
+
+
+@pytest.mark.parametrize("expires_in_seconds", [0, -1, 1.5, 604_801, True])
+def test_presigned_url_rejects_invalid_lifetimes(expires_in_seconds: object) -> None:
+    with pytest.raises(ValueError, match="expires_in_seconds"):
+        create_presigned_s3_url(
+            access_key_id=_CRED["access_key_id"],
+            secret_access_key=_CRED["secret_access_key"],
+            region=_CRED["region"],
+            url="https://examplebucket.s3.amazonaws.com/k.txt",
+            expires_in_seconds=expires_in_seconds,  # type: ignore[arg-type]
+            moment=_MOMENT,
+        )

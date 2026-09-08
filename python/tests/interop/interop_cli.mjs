@@ -9,6 +9,9 @@
  * Usage: node interop_cli.mjs <command> '<json-args>'
  */
 
+import crypto from "node:crypto";
+import { Readable } from "node:stream";
+
 const [, , command, rawArgs] = process.argv;
 const args = rawArgs ? JSON.parse(rawArgs) : {};
 
@@ -82,6 +85,50 @@ const commands = {
         .map((o) => ({ path: o.path, name: o.name, type: o.type ?? null, size: o.size ?? null }))
         .sort((a, b) => a.path.localeCompare(b.path))
     };
+  },
+
+  async encryptedStreamS3({ root, totalBytes }) {
+    const { EncryptedStorageWrapper } = await load("core");
+    const provider = await s3Provider(root);
+    const secure = new EncryptedStorageWrapper(provider, {
+      passphrase: "cross-sdk-live-stream-passphrase",
+      keyDerivationIterations: 10_000,
+      frameSize: 64 * 1024
+    });
+    const path = "encrypted-unknown-length.bin";
+    const expected = crypto.createHash("sha256");
+
+    async function* source() {
+      const chunkSize = 64 * 1024;
+      for (let offset = 0; offset < totalBytes; offset += chunkSize) {
+        const length = Math.min(chunkSize, totalBytes - offset);
+        const chunk = Buffer.alloc(length, (offset / chunkSize) % 251);
+        expected.update(chunk);
+        yield chunk;
+      }
+    }
+
+    try {
+      const uploaded = await secure.upload(path, Readable.from(source()));
+      const stored = await provider.metadata(path);
+      const output = await secure.download(path);
+      const actual = crypto.createHash("sha256");
+      let downloadedBytes = 0;
+      for await (const chunk of output.stream) {
+        downloadedBytes += chunk.byteLength;
+        actual.update(chunk);
+      }
+      return {
+        downloadedBytes,
+        reportedPlaintextBytes: uploaded.size ?? null,
+        storedBytes: stored.size ?? null,
+        expectedSha256: expected.digest("hex"),
+        actualSha256: actual.digest("hex")
+      };
+    } finally {
+      await provider.delete(path).catch(() => undefined);
+      await provider.disconnect();
+    }
   },
 
   // --- encryption ---------------------------------------------------------

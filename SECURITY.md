@@ -123,7 +123,15 @@ chunks rather than at the object size.
 
 Migration pipes the source stream straight into the target in both SDKs, so
 moving objects between providers is bounded by the chunk size rather than by
-the largest file. A 300 MB migration measures 57 MB of peak resident memory.
+the largest file. A 300 MB migration measures 56 MB of peak resident memory in
+either direction.
+
+That second clause was not true until downloads streamed as well. Python's
+adapters read the whole response body up front and handed back a single-chunk
+iterator, so `StorageOutput.stream()` buffered exactly what it promised not to.
+Uploads out of S3 were bounded while migrations *from* S3 cost 779 MB for the
+same 300 MB object. TypeScript was unaffected -- it passes the native fetch
+body straight through.
 
 ### Credential storage
 

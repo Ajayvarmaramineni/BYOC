@@ -186,16 +186,23 @@ class GoogleDriveProvider:
     async def download(self, path: str) -> StorageOutput:
         normalized = normalize_virtual_path(path)
 
-        async def fetch(file_id: str) -> tuple[dict[str, object], bytes]:
-            return await self.http.get_file(file_id), await self.http.download_file(file_id)
+        # Resolve the id and read metadata first, so a stale cache is healed
+        # before any bytes move. The content is fetched lazily below.
+        async def fetch(file_id: str) -> tuple[str, dict[str, object]]:
+            return file_id, await self.http.get_file(file_id)
 
-        resource, body = await self._with_healing(normalized, fetch)
+        resolved_id, resource = await self._with_healing(normalized, fetch)
 
         async def stream() -> AsyncIterator[bytes]:
-            yield body
+            # stream_download already existed and was never used here: download
+            # called download_file, which buffers the whole object, and then
+            # handed back a single-chunk iterator. A large file could not be
+            # read without holding all of it.
+            async for chunk in self.http.stream_download(resolved_id):
+                yield chunk
 
         async def read() -> bytes:
-            return body
+            return await self.http.download_file(resolved_id)
 
         return StorageOutput(
             metadata=self.http.to_storage_object(resource, normalized), stream=stream, read=read
@@ -269,10 +276,25 @@ class GoogleDriveProvider:
         resolved = options or UploadGrantOptions()
         normalized = normalize_virtual_path(path)
 
-        if resolved.size_bytes is None:
+        if (
+            isinstance(resolved.expires_in_seconds, bool)
+            or not isinstance(resolved.expires_in_seconds, int)
+            or not 1 <= resolved.expires_in_seconds <= 7 * 24 * 60 * 60
+        ):
+            raise InvalidInputError(
+                "expires_in_seconds must be an integer between 1 and 604800",
+                provider=PROVIDER_ID,
+            )
+
+        if (
+            resolved.size_bytes is None
+            or isinstance(resolved.size_bytes, bool)
+            or not isinstance(resolved.size_bytes, int)
+            or resolved.size_bytes < 0
+        ):
             raise InvalidInputError(
                 "Google Drive needs the total size before opening a resumable session. "
-                "Pass size_bytes (file.size in the browser) when creating the grant.",
+                "Pass size_bytes as a non-negative integer when creating the grant.",
                 provider=PROVIDER_ID,
             )
 

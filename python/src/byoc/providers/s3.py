@@ -520,19 +520,39 @@ class S3CompatibleProvider:
         url = self.object_url(key)
 
         async def fetch() -> httpx.Response:
-            response = await self._http().get(url, headers=self._sign("GET", url))
+            # stream=True holds the connection open and leaves the body unread,
+            # so a large object never has to fit in memory. Previously this read
+            # response.content up front and handed back a one-chunk iterator,
+            # which made StorageOutput.stream() a promise the adapter broke --
+            # and made migrating *out of* S3 cost more than the file's size.
+            request = self._http().build_request(
+                "GET", url, headers=self._sign("GET", url)
+            )
+            response = await self._http().send(request, stream=True)
             if response.is_error:
+                # The body is needed for the error message, so read it before
+                # closing; otherwise httpx raises on an unread streamed response.
+                await response.aread()
+                await response.aclose()
                 raise self._map_error(response, response.text)
             return response
 
         response = await with_retry(fetch)
-        body = response.content
 
         async def stream() -> AsyncIterator[bytes]:
-            yield body
+            try:
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+            finally:
+                # Closing releases the pooled connection. Without this an
+                # abandoned stream leaks it until garbage collection.
+                await response.aclose()
 
         async def read() -> bytes:
-            return body
+            try:
+                return await response.aread()
+            finally:
+                await response.aclose()
 
         return StorageOutput(
             metadata=self._object_from_headers(key, response), stream=stream, read=read
@@ -567,6 +587,15 @@ class S3CompatibleProvider:
         """
         resolved = options or UploadGrantOptions()
         normalized = normalize_virtual_path(path)
+        if (
+            isinstance(resolved.expires_in_seconds, bool)
+            or not isinstance(resolved.expires_in_seconds, int)
+            or not 1 <= resolved.expires_in_seconds <= 7 * 24 * 60 * 60
+        ):
+            raise InvalidInputError(
+                "expires_in_seconds must be an integer between 1 and 604800",
+                provider=PROVIDER_ID,
+            )
 
         return UploadGrant(
             provider=PROVIDER_ID,

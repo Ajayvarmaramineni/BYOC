@@ -254,3 +254,33 @@ async def test_a_streamed_upload_reports_progress(
     assert seen[-1] == 12 * 1024 * 1024
 
     await provider.delete("streamed/progress.bin")
+
+
+@requires_minio
+async def test_download_streams_instead_of_buffering(
+    provider: S3CompatibleProvider,
+) -> None:
+    """``stream()`` must not read the whole body first.
+
+    It used to: download() read response.content up front and yielded it as a
+    single chunk, so the accessor documented as "yields chunks without
+    buffering the whole object" did exactly that. It made migrating out of S3
+    cost more memory than the object itself.
+    """
+    total = 6 * 1024 * 1024
+
+    async def chunks() -> AsyncIterator[bytes]:
+        for _ in range(total // (1024 * 1024)):
+            yield b"d" * (1024 * 1024)
+
+    await provider.upload("streamed/download.bin", chunks())
+
+    output = await provider.download("streamed/download.bin")
+    received = [chunk async for chunk in output.stream()]
+
+    assert sum(len(c) for c in received) == total
+    assert b"".join(received) == b"d" * total
+    # A buffered implementation hands back exactly one chunk regardless of size.
+    assert len(received) > 1, "download() should yield several chunks, not one"
+
+    await provider.delete("streamed/download.bin")
