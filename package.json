@@ -23,7 +23,7 @@
   "devDependencies": {
     "@types/node": "^26.4.1",
     "typescript": "^5.4.5",
-    "vitest": "^4.1.11"
+    "vitest": "^5.0.0"
   },
   "packageManager": "npm@10.8.0",
   "homepage": "https://github.com/Ajayvarmaramineni/BYOC#readme",
